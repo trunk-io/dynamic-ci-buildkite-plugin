@@ -20,8 +20,19 @@
 # because a trigger skip breaks a build that never happens, while an
 # out-of-scope skip only skips a step the customer would have let us consider
 # had they not narrowed.
-def walk: .steps[]? | (., walk);
+# BOTH `objects` here are load-bearing, and neither is tidiness. A real agent
+# renders the shorthand `- wait` as the bare STRING "wait" — not as
+# `{"wait": null}`, which is what the longhand `- wait: ~` gives.
+#
+#   * in `walk`, because `.steps[]?` does not save us: the `?` suppresses a
+#     failure to ITERATE, not a failure to INDEX, so `"wait" | .steps` raises
+#     before the `?` is ever reached.
+#   * in the selection, because `.key` on a string is an ERROR, not a null.
+#
+# Without either one, the whole program exits non-zero on the most ordinary
+# pipeline there is and the plugin fails open having decided nothing.
+def walk: objects | .steps[]? | (., walk);
 
-[walk | select(.key != null and .trigger == null) | .key]
+[walk | objects | select(.key != null and .trigger == null) | .key]
 | if ($only | length) == 0 then . else map(select(IN($only[]))) end
 | if ($exclude | length) == 0 then . else map(select(IN($exclude[]) | not)) end

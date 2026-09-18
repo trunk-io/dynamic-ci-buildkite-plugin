@@ -52,6 +52,7 @@ describe("apply-skips.jq", () => {
           ],
         },
         { wait: null },
+        "wait",
         { key: "downstream", label: "Trigger core", trigger: "core" },
         {
           key: "gate-enter",
@@ -158,5 +159,47 @@ describe("apply-skips.jq", () => {
 
   it("is a no-op when the plan skips nothing", () => {
     expect(applySkips({})).toEqual(RENDERED_PIPELINE);
+  });
+
+  // REGRESSION, the mutation half of the one in collect-keys.vitest.ts. `has()`
+  // on a string raises the same way `.key` does, so a bare `- wait` anywhere in
+  // the pipeline used to take the whole mutation down with it.
+  describe("a shorthand step that renders as a bare string", () => {
+    it("passes through untouched, and the steps around it are still skipped", () => {
+      const out = applySkips(
+        {
+          before: "Trunk Dynamic CI: skipping",
+          after: "Trunk Dynamic CI: skipping",
+        },
+        { steps: [{ key: "before" }, "wait", { key: "after" }] },
+      );
+
+      expect(out).toEqual({
+        steps: [
+          { key: "before", skip: "Trunk Dynamic CI: skipping" },
+          "wait",
+          { key: "after", skip: "Trunk Dynamic CI: skipping" },
+        ],
+      });
+    });
+
+    it("passes through untouched inside a group", () => {
+      const out = applySkips(
+        { child: "Trunk Dynamic CI: skipping" },
+        { steps: [{ group: "g", steps: [{ key: "child" }, "wait"] }] },
+      );
+
+      expect(out).toEqual({
+        steps: [
+          {
+            group: "g",
+            steps: [
+              { key: "child", skip: "Trunk Dynamic CI: skipping" },
+              "wait",
+            ],
+          },
+        ],
+      });
+    });
   });
 });
