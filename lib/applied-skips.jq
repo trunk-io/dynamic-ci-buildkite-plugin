@@ -9,8 +9,14 @@
 #
 # Reasons come from the plan's untruncated `summary`, not from the 70-character
 # `skip:` value Buildkite shows, so the log is the fuller of the two.
-def walk: .steps[]? | (., walk);
-def marked: [walk | select(.key != null and (.skip | type) == "string") | .key];
+#
+# Both `objects` are there for the reason `collect-keys.jq` spells out: a bare
+# `- wait` renders as a string, and indexing a string is an error rather than a
+# null. This program's failure is caught and degraded to a generic message, so
+# the cost of getting it wrong is only a missing summary — but a missing summary
+# on every pipeline containing a `wait` is still wrong.
+def walk: objects | .steps[]? | (., walk);
+def marked: [walk | objects | select(.key != null and (.skip | type) == "string") | .key];
 
 # Long enough to read a real pipeline's decisions, short enough that a pipeline
 # with hundreds of steps does not bury the rest of the log. `debug: true` prints

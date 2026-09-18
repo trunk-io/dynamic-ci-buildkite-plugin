@@ -128,4 +128,38 @@ describe("collect-keys.jq with exclude-keys", () => {
       collect(RENDERED_PIPELINE),
     );
   });
+
+  // REGRESSION. A real agent renders the shorthand `- wait` as the bare string
+  // "wait" — only the longhand `- wait: ~` gives `{ wait: null }`. jq raises on
+  // indexing a string, so before this was guarded the program exited non-zero on
+  // any pipeline containing a plain `- wait`, and the plugin fail-opened having
+  // decided nothing. Nearly every real pipeline has one.
+  //
+  // It survived the unit tests because the fixture carried only the object form,
+  // and it was caught by the smoke test the first time it ran on a real agent.
+  // Both spellings are in the fixture now; these pin the shorthand explicitly.
+  describe("a shorthand step that renders as a bare string", () => {
+    it("does not stop the walk at the top level", () => {
+      expect(
+        collect({
+          steps: [{ key: "before" }, "wait", { key: "after" }],
+        }),
+      ).toEqual(["before", "after"]);
+    });
+
+    it("does not stop the walk inside a group", () => {
+      expect(
+        collect({
+          steps: [
+            { group: "g", steps: [{ key: "child" }, "wait"] },
+            { key: "sibling" },
+          ],
+        }),
+      ).toEqual(["child", "sibling"]);
+    });
+
+    it("is not itself collected as a key", () => {
+      expect(collect({ steps: ["wait", "block"] })).toEqual([]);
+    });
+  });
 });

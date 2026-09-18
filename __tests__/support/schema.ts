@@ -8,30 +8,46 @@ import * as z from "zod";
  * which is both unsafe and banned. So every test that reads a step out of jq's
  * output goes through these.
  *
- * A step is deliberately `Record<string, unknown>` rather than a modelled
- * Buildkite step. `apply-skips.jq` reads `.key`, `.trigger`, `.steps` and
- * `.skip` and treats everything else as opaque — that opacity is the property
- * the tests exist to pin, so typing the fixtures against Buildkite's own schema
- * would encode a shape the mutation is specifically designed not to depend on.
+ * An object step is deliberately `Record<string, unknown>` rather than a
+ * modelled Buildkite step. `apply-skips.jq` reads `.key`, `.trigger`, `.steps`
+ * and `.skip` and treats everything else as opaque — that opacity is the
+ * property the tests exist to pin, so typing the fixtures against Buildkite's
+ * own schema would encode a shape the mutation is specifically designed not to
+ * depend on.
+ *
+ * **A step is not always an object.** A real agent renders the shorthand
+ * `- wait` as the bare string `"wait"`. Modelling steps as records only is what
+ * hid a bug that broke every pipeline containing one, so the union is not
+ * pedantry — it is the fixture telling the truth about what Buildkite emits.
  */
-export const STEP_SCHEMA: z.ZodRecord<z.ZodString, z.ZodUnknown> = z.record(
-  z.string(),
-  z.unknown(),
-);
+export const OBJECT_STEP_SCHEMA: z.ZodRecord<z.ZodString, z.ZodUnknown> =
+  z.record(z.string(), z.unknown());
+
+export const STEP_SCHEMA: z.ZodUnion<[typeof OBJECT_STEP_SCHEMA, z.ZodString]> =
+  z.union([OBJECT_STEP_SCHEMA, z.string()]);
+
+export type Step = z.infer<typeof STEP_SCHEMA>;
 
 export const PIPELINE_SCHEMA: z.ZodObject<{
   steps: z.ZodArray<typeof STEP_SCHEMA>;
 }> = z.object({ steps: z.array(STEP_SCHEMA) });
 
-export const pipelineSteps = (out: unknown): Record<string, unknown>[] =>
+/** Every step, shorthand ones included. */
+export const pipelineSteps = (out: unknown): Step[] =>
   PIPELINE_SCHEMA.parse(out).steps;
+
+/** Only the steps that are objects, for assertions that index into them. */
+export const objectSteps = (out: unknown): Record<string, unknown>[] =>
+  pipelineSteps(out).filter(
+    (step): step is Record<string, unknown> => typeof step !== "string",
+  );
 
 /** One top-level step by its `key`, so the assertion is type-checked. */
 export const stepByKey = (
   out: unknown,
   key: string,
 ): Record<string, unknown> => {
-  const step = pipelineSteps(out).find((candidate) => candidate["key"] === key);
+  const step = objectSteps(out).find((candidate) => candidate["key"] === key);
   if (step === undefined) {
     throw new Error(`no step keyed ${key} in jq's output`);
   }
@@ -40,9 +56,9 @@ export const stepByKey = (
 
 /** The children of a pipeline's one `group:` step. */
 export const groupChildren = (out: unknown): Record<string, unknown>[] => {
-  const group = pipelineSteps(out).find((step) => "group" in step);
+  const group = objectSteps(out).find((step) => "group" in step);
   if (group === undefined) {
     throw new Error("jq did not return the fixture's group step");
   }
-  return z.array(STEP_SCHEMA).parse(group["steps"]);
+  return z.array(OBJECT_STEP_SCHEMA).parse(group["steps"]);
 };
