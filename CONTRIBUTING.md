@@ -117,8 +117,8 @@ Two pipelines:
   API. See [`.buildkite/smoke/README.md`](.buildkite/smoke/README.md), which is
   also the runbook — in particular, **retry the build, not the smoke step**.
 
-**Pull requests from forks do not build.** The smoke pipeline needs a real Trunk
-API token, this repository is public, and a fork pull request is code we have not
+**Pull requests from forks do not build.** Both pipelines carry a real Trunk API
+token, this repository is public, and a fork pull request is code we have not
 reviewed yet — so `build_pull_request_forks` is off, and a fork PR gets no status
 at all. To run CI on an outside contribution, push the commits to a branch in
 this repository and open the pull request from there.

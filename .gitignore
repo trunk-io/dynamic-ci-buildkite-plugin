@@ -143,3 +143,6 @@ vite.config.ts.timestamp-*
 
 # Test report emitted by `pnpm test`.
 junit.xml
+
+# Artifacts written by the smoke test (.buildkite/smoke/run.sh).
+smoke-out/

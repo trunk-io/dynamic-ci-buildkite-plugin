@@ -1,0 +1,44 @@
+# The Dynamic CI plugin, exercised as a plugin, on a real agent, at the commit
+# under test. This is the thing that could not be done while the plugin lived in
+# a subdirectory of the GitHub Action's repository.
+#
+# Registered step: `buildkite-agent pipeline upload .buildkite/smoke.yml`.
+#
+# ONE STEP, DELIBERATELY. `run.sh` uploads a sample pipeline into this same
+# build, and uploaded steps are inserted immediately after the step that uploads
+# them. With exactly one step here, the sample lands at the end of the tree and
+# nothing can end up blocked behind it. Do not add steps after this one.
+steps:
+  - label: ":trunk: smoke — filter mode against staging"
+    key: smoke-filter
+    agents:
+      queue: managed
+    timeout_in_minutes: 20
+    artifact_paths:
+      - smoke-out/*
+    env:
+      TRUNK_PUBLIC_API_ADDRESS: https://api.trunk-staging.io
+      # An agent caches a plugin's checkout by the ref it was asked for. The ref
+      # below is a sha, so the path is already unique per commit and nothing
+      # stale can be reused — this says so out loud rather than relying on it.
+      BUILDKITE_PLUGINS_ALWAYS_CLONE_FRESH: "true"
+    secrets:
+      - TRUNK_STAGING_ORG_API_TOKEN
+    plugins:
+      # `${BUILDKITE_COMMIT}` is interpolated by the registered step's `pipeline
+      # upload`, which runs BEFORE plugins are resolved — so the agent checks out
+      # this pull request's code, and the smoke test tests the change rather than
+      # whatever is on main.
+      #
+      # This cannot work for a fork pull request: the sha is not on our remote.
+      # That is consistent with forks not building at all (see CONTRIBUTING.md).
+      #
+      # Note the recursion, and do not go hunting for a bug in run.sh when it
+      # bites: a commit that breaks plugin.yml fails during plugin RESOLUTION,
+      # before the command runs, and surfaces as an agent error rather than an
+      # assertion failure.
+      - trunk-io/dynamic-ci#${BUILDKITE_COMMIT}:
+          mode: filter
+          token-env: TRUNK_STAGING_ORG_API_TOKEN
+          debug: true
+    command: .buildkite/smoke/run.sh
