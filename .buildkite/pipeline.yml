@@ -48,12 +48,12 @@ steps:
     secrets:
       - TRUNK_STAGING_ORG_API_TOKEN
     env:
-      # TODO: replace with the unit-test collection created in the staging org.
-      # Until it is a real id the upload is skipped rather than attempted, so a
-      # placeholder does not redden every build.
-      TRUNK_TEST_COLLECTION_ID: REPLACE_ME
+      # The unit suite's collection in the staging org. The smoke assertions have
+      # their own, in .buildkite/smoke/sample.yml — same org, separate history,
+      # because a smoke assertion flaking and a unit test flaking are different
+      # things to be told about.
+      TRUNK_TEST_COLLECTION_ID: QgnAERiY
     commands:
-      - if [ "$$TRUNK_TEST_COLLECTION_ID" = "REPLACE_ME" ]; then echo "^^^ +++"; echo "TRUNK_TEST_COLLECTION_ID is still the placeholder — create the unit-test collection in the staging org and set it in .buildkite/pipeline.yml. Results are NOT being uploaded, and quarantining is NOT being applied."; exit 0; fi
       - buildkite-agent artifact download junit.xml .
       - curl -fL --retry 3 "https://github.com/trunk-io/analytics-cli/releases/latest/download/trunk-analytics-cli-x86_64-unknown-linux.tar.gz" | tar -xz && chmod +x trunk-analytics-cli
       - ./trunk-analytics-cli upload --junit-paths "junit.xml" --org-url-slug "$$TRUNK_ORG_URL_SLUG" --token "$$TRUNK_STAGING_ORG_API_TOKEN" --test-collection-id "$$TRUNK_TEST_COLLECTION_ID"
