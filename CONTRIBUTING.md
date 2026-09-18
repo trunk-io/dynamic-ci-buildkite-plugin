@@ -107,11 +107,49 @@ with itself no matter what it had fetched. Then update the version assertion in
 Everything that gates a pull request runs on Buildkite, in `.buildkite/`. The one
 GitHub Actions workflow is `release.yml`, which moves a tag.
 
+Two pipelines:
+
+- **`dynamic-ci-buildkite-plugin`** — `.buildkite/pipeline.yml`. trunk check,
+  typecheck, the suite, the plugin linter, and a check that every executable kept
+  its exec bit.
+- **`dynamic-ci-buildkite-plugin-smoke`** — `.buildkite/smoke.yml`. The plugin
+  resolved at the commit under test and run against a real agent and the staging
+  API. See [`.buildkite/smoke/README.md`](.buildkite/smoke/README.md), which is
+  also the runbook — in particular, **retry the build, not the smoke step**.
+
 **Pull requests from forks do not build.** The smoke pipeline needs a real Trunk
 API token, this repository is public, and a fork pull request is code we have not
 reviewed yet — so `build_pull_request_forks` is off, and a fork PR gets no status
 at all. To run CI on an outside contribution, push the commits to a branch in
 this repository and open the pull request from there.
+
+### Test results
+
+Both pipelines report to **Trunk Flaky Tests in the staging org**
+(`trunk-staging-org`), each into its own test collection: one for the unit suite,
+one for the smoke assertions.
+
+The upload is always a **separate pipeline step** from the step that runs the
+tests, and that separation is load-bearing twice over:
+
+- The test step carries `soft_fail: true` and the upload step carries
+  `depends_on` plus `allow_dependency_failure: true`. So a failing suite still
+  uploads — which is the only case where a flake can be detected at all — and the
+  **upload step owns the build's verdict**, because it is the only thing that
+  knows which failures are quarantined. Burying the upload inside the test runner
+  gives up both properties.
+- It keeps the runner scripts about running tests.
+
+Uploads go to staging, so the step sets `TRUNK_PUBLIC_API_ADDRESS` (the CLI talks
+to production by default) and takes the token from the `TRUNK_STAGING_ORG_API_TOKEN`
+cluster secret.
+
+The smoke assertions are reported as tests too. `run.sh` and `verdict.sh` each
+write a JUnit report, which is why their `pass`/`fail` helpers take a **stable
+name** as the first argument and put anything variable — an elapsed time, an exit
+code — in the optional second. Flaky Tests keys a test on its name, so a name
+carrying a duration would register a new test every run and no flake could ever
+be found.
 
 ## Releasing
 

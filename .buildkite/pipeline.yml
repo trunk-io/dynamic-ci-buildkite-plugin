@@ -4,17 +4,16 @@
 # `buildkite-agent pipeline upload`, so the steps are reviewed here rather than
 # configured in the Buildkite UI.
 #
-# This pipeline holds NO secrets. Everything that needs a Trunk API token lives
-# in the smoke pipeline (.buildkite/smoke.yml), which keeps this one movable to a
-# secret-free cluster if we ever want CI on fork pull requests.
-#
-# It also deliberately does NOT pipe its own upload through
+# It deliberately does NOT pipe its own upload through
 # `trunk-dynamic-ci-filter`. Dogfooding here would let a broken change skip the
 # very steps that would have caught it; dogfooding belongs in the smoke test,
 # where the blast radius is a fixture.
-#
-# Four independent steps, no `depends_on` — nothing here produces an input to
-# anything else.
+env:
+  # Test results go to the STAGING deployment, so the CLI needs its host
+  # overridden — it talks to production by default.
+  TRUNK_PUBLIC_API_ADDRESS: https://api.trunk-staging.io
+  TRUNK_ORG_URL_SLUG: trunk-staging-org
+
 steps:
   - label: ":trunk: check"
     key: trunk-check
@@ -25,13 +24,39 @@ steps:
       - trunk-check.out
     command: .buildkite/steps/trunk-check.sh
 
+  # `soft_fail` is not leniency: it hands the verdict to the upload step below,
+  # which is the only thing that knows which failures are quarantined. Without
+  # it a quarantined flake reddens the build before Trunk is ever asked.
   - label: ":vitest: typecheck + unit tests"
-    key: unit-tests
+    key: tests
     agents: *agents
     timeout_in_minutes: *timeout
+    soft_fail: true
     artifact_paths:
       - junit.xml
     command: .buildkite/steps/unit-tests.sh
+
+  # `allow_dependency_failure` is the whole point: a failing suite is exactly
+  # when the results matter most, and a test report that only uploads when the
+  # tests passed cannot detect a flake.
+  - label: ":trunk: upload unit test results"
+    key: upload-unit-tests
+    agents: *agents
+    timeout_in_minutes: *timeout
+    depends_on: tests
+    allow_dependency_failure: true
+    secrets:
+      - TRUNK_STAGING_ORG_API_TOKEN
+    env:
+      # TODO: replace with the unit-test collection created in the staging org.
+      # Until it is a real id the upload is skipped rather than attempted, so a
+      # placeholder does not redden every build.
+      TRUNK_TEST_COLLECTION_ID: REPLACE_ME
+    commands:
+      - if [ "$$TRUNK_TEST_COLLECTION_ID" = "REPLACE_ME" ]; then echo "^^^ +++"; echo "TRUNK_TEST_COLLECTION_ID is still the placeholder — create the unit-test collection in the staging org and set it in .buildkite/pipeline.yml. Results are NOT being uploaded, and quarantining is NOT being applied."; exit 0; fi
+      - buildkite-agent artifact download junit.xml .
+      - curl -fL --retry 3 "https://github.com/trunk-io/analytics-cli/releases/latest/download/trunk-analytics-cli-x86_64-unknown-linux.tar.gz" | tar -xz && chmod +x trunk-analytics-cli
+      - ./trunk-analytics-cli upload --junit-paths "junit.xml" --org-url-slug "$$TRUNK_ORG_URL_SLUG" --token "$$TRUNK_STAGING_ORG_API_TOKEN" --test-collection-id "$$TRUNK_TEST_COLLECTION_ID"
 
   - label: ":buildkite: plugin lint"
     key: plugin-lint
