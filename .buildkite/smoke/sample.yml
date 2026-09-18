@@ -85,12 +85,12 @@ steps:
     env:
       TRUNK_PUBLIC_API_ADDRESS: https://api.trunk-staging.io
       TRUNK_ORG_URL_SLUG: trunk-staging-org
-      # TODO: replace with the smoke-test collection created in the staging org.
-      # Until it is a real id the upload is skipped rather than attempted, so a
-      # placeholder does not redden every build.
-      TRUNK_TEST_COLLECTION_ID: REPLACE_ME
+      # The smoke assertions' own collection, separate from the unit suite's
+      # (QgnAERiY, in .buildkite/pipeline.yml). Separate because they answer
+      # different questions: a unit test flaking says the jq or the shell is
+      # unstable, a smoke assertion flaking says the agent or the service is.
+      TRUNK_TEST_COLLECTION_ID: FSf4Dg2D
     commands:
-      - if [ "$$TRUNK_TEST_COLLECTION_ID" = "REPLACE_ME" ]; then echo "^^^ +++"; echo "TRUNK_TEST_COLLECTION_ID is still the placeholder — create the smoke-test collection in the staging org and set it in .buildkite/smoke/sample.yml. Results are NOT being uploaded."; exit 0; fi
       - buildkite-agent artifact download "smoke-out/junit-*.xml" .
       - curl -fL --retry 3 "https://github.com/trunk-io/analytics-cli/releases/latest/download/trunk-analytics-cli-x86_64-unknown-linux.tar.gz" | tar -xz && chmod +x trunk-analytics-cli
       - ./trunk-analytics-cli upload --junit-paths "smoke-out/junit-*.xml" --org-url-slug "$$TRUNK_ORG_URL_SLUG" --token "$$TRUNK_STAGING_ORG_API_TOKEN" --test-collection-id "$$TRUNK_TEST_COLLECTION_ID"
