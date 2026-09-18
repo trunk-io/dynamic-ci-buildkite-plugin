@@ -20,8 +20,12 @@
 # because a trigger skip breaks a build that never happens, while an
 # out-of-scope skip only skips a step the customer would have let us consider
 # had they not narrowed.
-def walk: .steps[]? | (., walk);
+# A step is not always an object: the agent renders the shorthand `- wait` as the
+# bare string "wait", where the longhand `- wait: ~` gives `{"wait": null}`.
+# Indexing a string raises in jq, so both `objects` are load-bearing — including
+# the one in `walk`, because `?` suppresses a failure to iterate, not to index.
+def walk: objects | .steps[]? | (., walk);
 
-[walk | select(.key != null and .trigger == null) | .key]
+[walk | objects | select(.key != null and .trigger == null) | .key]
 | if ($only | length) == 0 then . else map(select(IN($only[]))) end
 | if ($exclude | length) == 0 then . else map(select(IN($exclude[]) | not)) end

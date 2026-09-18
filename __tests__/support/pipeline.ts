@@ -3,7 +3,9 @@
  * emits, covering every case the mutation has to get right in one document: a
  * plain keyed step, a step the customer already skipped, a step the customer
  * explicitly forced on, a step with no `key:`, a `group:` whose children are
- * keyed, a `depends_on` pointing at a step the plan skips, and a `wait`.
+ * keyed, a `depends_on` pointing at a step the plan skips, and both spellings of
+ * a wait — `- wait: ~` renders as `{ wait: null }`, `- wait` as the string
+ * "wait". Carrying only the object form once let a bug ship.
  */
 export const RENDERED_PIPELINE = {
   steps: [
@@ -24,6 +26,7 @@ export const RENDERED_PIPELINE = {
       ],
     },
     { wait: null },
+    "wait",
     { key: "downstream", label: "Trigger core", trigger: "core" },
     {
       key: "gate-enter",

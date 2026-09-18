@@ -1,0 +1,95 @@
+# The pipeline the filter is run against. Shaped to cover every branch the key
+# walk and the mutation can take on a customer's pipeline:
+#
+#   * a plain keyed step            — the ordinary case
+#   * a second keyed step           — so a plan can name one and not the other
+#   * an UNKEYED step               — which the plugin must never touch
+#   * a group with a keyed child    — nesting, which the walk has to recurse into
+#
+# Keys are namespaced `smoke-sample-*` because keys are unique per BUILD, not per
+# upload, and this pipeline is uploaded into the build that is already running.
+#
+# `$$` IS NOT A TYPO. Buildkite interpolates an uploaded pipeline once, at upload
+# time, so `$$FOO` is how a command keeps a `$FOO` for its own runtime. The
+# canary below depends on exactly one pass having happened.
+steps:
+  - label: ":white_circle: sample alpha"
+    key: smoke-sample-alpha
+    agents: &agents
+      queue: managed
+    timeout_in_minutes: &timeout 10
+    env: &canary
+      # Interpolated once, now, by the upload inside run.sh. The step asserts it
+      # matches the build number it can read at runtime — which catches both
+      # halves of the interpolation contract: no pass at all (the literal
+      # `${BUILDKITE_BUILD_NUMBER}` survives) and two passes.
+      SMOKE_INTERPOLATION_CANARY: "build-${BUILDKITE_BUILD_NUMBER}"
+    command: .buildkite/smoke/sample-step.sh alpha
+
+  - label: ":white_circle: sample beta"
+    key: smoke-sample-beta
+    agents: *agents
+    timeout_in_minutes: *timeout
+    env: *canary
+    command: .buildkite/smoke/sample-step.sh beta
+
+  # No `key:`. The plugin is never permitted to skip a step it was not given a
+  # key for, and the verdict step asserts this one ran unconditionally.
+  - label: ":white_circle: sample unkeyed"
+    agents: *agents
+    timeout_in_minutes: *timeout
+    env: *canary
+    command: .buildkite/smoke/sample-step.sh unkeyed
+
+  - group: ":package: sample group"
+    key: smoke-sample-group
+    steps:
+      - label: ":white_circle: sample gamma"
+        key: smoke-sample-gamma
+        agents: *agents
+        timeout_in_minutes: *timeout
+        env: *canary
+        command: .buildkite/smoke/sample-step.sh gamma
+
+  # Not skippable, and it is what orders the verdict after every sample step.
+  # The verdict deliberately does NOT `depends_on` a skippable step — dependency
+  # semantics around a skipped step are not something to stake a green build on.
+  - wait
+
+  - label: ":mag: smoke verdict"
+    key: smoke-verdict
+    agents: *agents
+    timeout_in_minutes: *timeout
+    soft_fail: true
+    artifact_paths:
+      - smoke-out/junit-verdict.xml
+    command: .buildkite/smoke/verdict.sh
+
+  # The upload lives HERE, at the end of the pipeline run.sh uploads, rather than
+  # in smoke.yml — because this is the only point at which both reports exist.
+  # run.sh's own report is uploaded as an artifact when its step ends, and that
+  # step is already over by the time anything here runs.
+  #
+  # `allow_dependency_failure`, for the reason it always is: a failing assertion
+  # is exactly the result worth reporting, and an upload that only runs on
+  # success cannot detect a flake.
+  - label: ":trunk: upload smoke test results"
+    key: upload-smoke-results
+    agents: *agents
+    timeout_in_minutes: *timeout
+    depends_on:
+      - smoke-verdict
+    allow_dependency_failure: true
+    secrets:
+      - TRUNK_STAGING_ORG_API_TOKEN
+    env:
+      TRUNK_PUBLIC_API_ADDRESS: https://api.trunk-staging.io
+      TRUNK_ORG_URL_SLUG: trunk-staging-org
+      # Separate from the unit suite's collection in ../pipeline.yml: a unit
+      # test flaking says the jq or the shell is unstable, a smoke assertion
+      # flaking says the agent or the service is.
+      TRUNK_TEST_COLLECTION_ID: FSf4Dg2D
+    commands:
+      - buildkite-agent artifact download "smoke-out/junit-*.xml" .
+      - curl -fL --retry 3 "https://github.com/trunk-io/analytics-cli/releases/latest/download/trunk-analytics-cli-x86_64-unknown-linux.tar.gz" | tar -xz && chmod +x trunk-analytics-cli
+      - ./trunk-analytics-cli upload --junit-paths "smoke-out/junit-*.xml" --org-url-slug "$$TRUNK_ORG_URL_SLUG" --token "$$TRUNK_STAGING_ORG_API_TOKEN" --test-collection-id "$$TRUNK_TEST_COLLECTION_ID"

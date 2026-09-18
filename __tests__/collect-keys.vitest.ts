@@ -128,4 +128,32 @@ describe("collect-keys.jq with exclude-keys", () => {
       collect(RENDERED_PIPELINE),
     );
   });
+
+  // REGRESSION. Unguarded, a bare `- wait` made this program exit non-zero and
+  // the plugin fail open — on nearly every real pipeline. The fixture carried
+  // only the longhand form, so nothing here caught it.
+  describe("a shorthand step that renders as a bare string", () => {
+    it("does not stop the walk at the top level", () => {
+      expect(
+        collect({
+          steps: [{ key: "before" }, "wait", { key: "after" }],
+        }),
+      ).toEqual(["before", "after"]);
+    });
+
+    it("does not stop the walk inside a group", () => {
+      expect(
+        collect({
+          steps: [
+            { group: "g", steps: [{ key: "child" }, "wait"] },
+            { key: "sibling" },
+          ],
+        }),
+      ).toEqual(["child", "sibling"]);
+    });
+
+    it("is not itself collected as a key", () => {
+      expect(collect({ steps: ["wait", "block"] })).toEqual([]);
+    });
+  });
 });

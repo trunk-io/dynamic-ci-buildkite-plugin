@@ -1,0 +1,34 @@
+# The plugin, exercised as a plugin, on a real agent, at the commit under test.
+#
+# ONE STEP, DELIBERATELY. `run.sh` uploads a sample pipeline into this same
+# build, and uploaded steps are inserted immediately after the step that uploads
+# them — so with one step here the sample lands at the end of the tree and
+# nothing can be blocked behind it. Anything that must run after the sample
+# belongs at the end of smoke/sample.yml.
+steps:
+  - label: ":trunk: smoke — filter mode"
+    key: smoke-filter
+    agents:
+      queue: managed
+    timeout_in_minutes: 20
+    artifact_paths:
+      - smoke-out/*
+    env:
+      TRUNK_PUBLIC_API_ADDRESS: https://api.trunk-staging.io
+      BUILDKITE_PLUGINS_ALWAYS_CLONE_FRESH: "true"
+    secrets:
+      - TRUNK_STAGING_ORG_API_TOKEN
+    plugins:
+      # `${BUILDKITE_COMMIT}` is interpolated by the registered step's upload,
+      # which runs BEFORE plugins are resolved — so the agent checks out this
+      # pull request's code rather than whatever is on main. It cannot work for
+      # a fork, whose sha is not on our remote; forks do not build here anyway.
+      #
+      # A commit that breaks plugin.yml fails during plugin RESOLUTION, before
+      # the command runs, so it surfaces as an agent error rather than a failed
+      # assertion. Do not go hunting in run.sh for it.
+      - trunk-io/dynamic-ci#${BUILDKITE_COMMIT}:
+          mode: filter
+          token-env: TRUNK_STAGING_ORG_API_TOKEN
+          debug: true
+    command: .buildkite/smoke/run.sh

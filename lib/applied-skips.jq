@@ -9,8 +9,10 @@
 #
 # Reasons come from the plan's untruncated `summary`, not from the 70-character
 # `skip:` value Buildkite shows, so the log is the fuller of the two.
-def walk: .steps[]? | (., walk);
-def marked: [walk | select(.key != null and (.skip | type) == "string") | .key];
+#
+# `objects` for the reason `collect-keys.jq` gives.
+def walk: objects | .steps[]? | (., walk);
+def marked: [walk | objects | select(.key != null and (.skip | type) == "string") | .key];
 
 # Long enough to read a real pipeline's decisions, short enough that a pipeline
 # with hundreds of steps does not bury the rest of the log. `debug: true` prints
