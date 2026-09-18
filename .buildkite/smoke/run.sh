@@ -106,35 +106,64 @@ else
     fail "the filter exited ${filter_rc}"
 fi
 
-# 3. Stdout is the pipeline and NOTHING else. Parsing is a stronger test than
-#    grepping for log markers: one stray byte of logging breaks it, whatever that
-#    byte happens to say.
-if "${jq_bin}" -e 'type == "object"' <"${OUT}/after.json" >/dev/null 2>&1; then
-    pass "stdout is a single JSON object and nothing else"
+# WHICH CONTRACT APPLIES depends on which path the filter took, and conflating
+# the two is a mistake this file made once already.
+#
+# On success the filter emits JSON and may add `skip`. On a fail-open it replays
+# the input BYTE FOR BYTE — and the input here is YAML, so "stdout is JSON" is
+# simply the wrong thing to assert about a correct fail-open. Asserting it anyway
+# turns a healthy plugin talking to a service with no data for this repository
+# into three red assertions that name the wrong thing.
+#
+# So: establish which path was taken, then assert that path's contract.
+if saw_fail_open "${OUT}/filter.stderr"; then
+    FILTER_SUCCEEDED=false
 else
-    fail "stdout is not parseable as a pipeline — something logged to stdout"
-    head -c 400 "${OUT}/after.json" >&2
+    FILTER_SUCCEEDED=true
 fi
 
-# 4. THE CENTRAL INVARIANT. Strip every `skip` at every nesting level from both
-#    documents; what is left must be identical. That says "the only thing the
-#    filter may have changed is `skip:`" — step order, group nesting, unkeyed
-#    steps, env, commands, everything — WITHOUT asserting whether anything was
-#    skipped. It is the assertion that stays true once the service has history.
-"${jq_bin}" -S 'walk(if type == "object" and has("skip") then del(.skip) else . end)' \
-    <"${OUT}/before.json" >"${OUT}/before.stripped.json" 2>/dev/null
-"${jq_bin}" -S 'walk(if type == "object" and has("skip") then del(.skip) else . end)' \
-    <"${OUT}/after.json" >"${OUT}/after.stripped.json" 2>/dev/null
-if cmp -s "${OUT}/before.stripped.json" "${OUT}/after.stripped.json"; then
-    pass "the pipeline is untouched apart from skip:"
+if [[ ${FILTER_SUCCEEDED} == false ]]; then
+    # 3-5 (fail-open contract). One assertion, and it is the strongest one
+    # available: the bytes back are the bytes in. Tier 2 says why it failed open
+    # and decides whether that reason is acceptable.
+    if cmp -s "${SAMPLE}" "${OUT}/after.json"; then
+        pass "the filter failed open and replayed the input byte for byte"
+    else
+        fail "the filter failed open but did NOT replay the input unchanged"
+        diff <(head -20 "${SAMPLE}") <(head -20 "${OUT}/after.json") >&2 || true
+    fi
+    echo "  · structural assertions skipped: there is no mutation to check."
 else
-    fail "the filter changed something other than skip:"
-    diff "${OUT}/before.stripped.json" "${OUT}/after.stripped.json" | head -40 >&2
-fi
 
-# 5. Any skip it did add is well-formed: on a keyed, non-trigger step, and within
-#    Buildkite's 70-character limit for the field.
-if "${jq_bin}" -e '
+    # 3. Stdout is the pipeline and NOTHING else. Parsing is a stronger test than
+    #    grepping for log markers: one stray byte of logging breaks it, whatever that
+    #    byte happens to say.
+    if "${jq_bin}" -e 'type == "object"' <"${OUT}/after.json" >/dev/null 2>&1; then
+        pass "stdout is a single JSON object and nothing else"
+    else
+        fail "stdout is not parseable as a pipeline — something logged to stdout"
+        head -c 400 "${OUT}/after.json" >&2
+    fi
+
+    # 4. THE CENTRAL INVARIANT. Strip every `skip` at every nesting level from both
+    #    documents; what is left must be identical. That says "the only thing the
+    #    filter may have changed is `skip:`" — step order, group nesting, unkeyed
+    #    steps, env, commands, everything — WITHOUT asserting whether anything was
+    #    skipped. It is the assertion that stays true once the service has history.
+    "${jq_bin}" -S 'walk(if type == "object" and has("skip") then del(.skip) else . end)' \
+        <"${OUT}/before.json" >"${OUT}/before.stripped.json" 2>/dev/null
+    "${jq_bin}" -S 'walk(if type == "object" and has("skip") then del(.skip) else . end)' \
+        <"${OUT}/after.json" >"${OUT}/after.stripped.json" 2>/dev/null
+    if cmp -s "${OUT}/before.stripped.json" "${OUT}/after.stripped.json"; then
+        pass "the pipeline is untouched apart from skip:"
+    else
+        fail "the filter changed something other than skip:"
+        diff "${OUT}/before.stripped.json" "${OUT}/after.stripped.json" | head -40 >&2
+    fi
+
+    # 5. Any skip it did add is well-formed: on a keyed, non-trigger step, and within
+    #    Buildkite's 70-character limit for the field.
+    if "${jq_bin}" -e '
     [ .. | objects | select(has("skip") and (.skip | type == "string")) ]
     | all(
         (.skip | length > 0 and length <= 70)
@@ -142,12 +171,15 @@ if "${jq_bin}" -e '
         and (.trigger == null)
       )
 ' <"${OUT}/after.json" >/dev/null 2>&1; then
-    pass "every skip added is well-formed, keyed and within 70 chars"
-else
-    fail "a skip was added that is malformed, unkeyed, or on a trigger step"
+        pass "every skip added is well-formed, keyed and within 70 chars"
+    else
+        fail "a skip was added that is malformed, unkeyed, or on a trigger step"
+    fi
+
 fi
 
-# 6. A real agent accepts the result — not merely a JSON parser.
+# 6. A real agent accepts the result — not merely a JSON parser. This one holds
+#    on both paths: a replayed YAML pipeline has to be uploadable too.
 if buildkite-agent pipeline upload --dry-run <"${OUT}/after.json" \
     >/dev/null 2>"${OUT}/after-dryrun.stderr"; then
     pass "buildkite-agent accepts the filtered pipeline"
@@ -262,21 +294,57 @@ fi
 # ---------------------------------------------------------------------------
 echo "--- :satellite: tier 2 — staging answered"
 
-if grep -qF "debug · request body" "${OUT}/filter.stderr" &&
-    grep -qF "debug · plan" "${OUT}/filter.stderr"; then
-    pass "a request was sent and a plan came back and parsed"
+# The request was built and sent. This much is unconditional: whatever the
+# service says back, failing to get this far is a plugin defect.
+if grep -qF "debug · request body" "${OUT}/filter.stderr"; then
+    pass "a request body was built and a request was sent"
 else
-    fail "no plan was requested or none parsed (is debug: true still set?)"
+    fail "no request was sent (is debug: true still set?)"
 fi
 
-# The absence of a fail-open marker IS the claim that a 2xx plan was read: with
-# no history the resulting pipeline is identical either way, so there is nothing
-# else to look at.
-if saw_fail_open "${OUT}/filter.stderr"; then
-    fail "the filter failed open against staging"
-    grep -F "Dynamic CI" "${OUT}/filter.stderr" >&2 || true
+# `request-plan.sh` logs "could not be made" only when curl never got a response
+# — DNS, connection, timeout. Reaching the service at all is the part that is
+# genuinely ours, so it is asserted whatever the service then decides.
+if grep -qF "the plan request could not be made" "${OUT}/filter.stderr"; then
+    fail "the request never reached the service (connection, DNS or timeout)"
 else
-    pass "the filter did not fail open"
+    pass "the request reached the service"
+fi
+
+# Now what it answered. Three cases, and only one of them is a defect.
+if grep -qF "debug · plan" "${OUT}/filter.stderr"; then
+    # A plan came back and parsed. This is the full-strength case, and what this
+    # tier becomes permanently once the repository is onboarded in staging.
+    pass "a plan came back and parsed"
+    if saw_fail_open "${OUT}/filter.stderr"; then
+        fail "a plan came back, but the filter still failed open"
+        grep -F "Dynamic CI" "${OUT}/filter.stderr" >&2 || true
+    else
+        pass "the filter did not fail open"
+    fi
+elif grep -qF "REPOSITORY_NOT_FOUND" "${OUT}/filter.stderr"; then
+    # NOT A FAILURE, and the distinction is the whole reason this branch exists.
+    # A 404 here is the service saying it holds no CI history for this
+    # repository, which is a true statement about a repository that has never
+    # run CI — not a defect in the plugin. Failing on it would make this build
+    # permanently red for a reason no change to this repository could fix.
+    #
+    # It is still real signal: a 404 proves the request was routed,
+    # authenticated and understood. Everything up to the verdict works.
+    #
+    # Onboard trunk-io/dynamic-ci-buildkite-plugin in the staging org and this
+    # branch stops being taken, at which point the assertions above apply in
+    # full, with no change to this file.
+    echo "  ⚠ staging holds no CI history for this repository yet (REPOSITORY_NOT_FOUND)."
+    echo "    The request was routed, authenticated and understood — a 404 is the"
+    echo "    service answering, not the plugin failing. Onboard the repo in the"
+    echo "    staging org and this becomes a full assertion automatically."
+else
+    # Anything else — a 401, a 5xx, a plan this version cannot read — is a defect
+    # or an outage, and either way it belongs in red.
+    fail "the service answered, but not with a plan and not with a recognised 404"
+    grep -F "Dynamic CI" "${OUT}/filter.stderr" >&2 || true
+    grep -F "the plan request returned HTTP" "${OUT}/filter.stderr" >&2 || true
 fi
 
 # ---------------------------------------------------------------------------
