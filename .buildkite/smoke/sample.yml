@@ -85,10 +85,9 @@ steps:
     env:
       TRUNK_PUBLIC_API_ADDRESS: https://api.trunk-staging.io
       TRUNK_ORG_URL_SLUG: trunk-staging-org
-      # The smoke assertions' own collection, separate from the unit suite's
-      # (QgnAERiY, in .buildkite/pipeline.yml). Separate because they answer
-      # different questions: a unit test flaking says the jq or the shell is
-      # unstable, a smoke assertion flaking says the agent or the service is.
+      # Separate from the unit suite's collection in ../pipeline.yml: a unit
+      # test flaking says the jq or the shell is unstable, a smoke assertion
+      # flaking says the agent or the service is.
       TRUNK_TEST_COLLECTION_ID: FSf4Dg2D
     commands:
       - buildkite-agent artifact download "smoke-out/junit-*.xml" .

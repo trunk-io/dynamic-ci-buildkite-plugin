@@ -3,15 +3,9 @@
  * emits, covering every case the mutation has to get right in one document: a
  * plain keyed step, a step the customer already skipped, a step the customer
  * explicitly forced on, a step with no `key:`, a `group:` whose children are
- * keyed, a `depends_on` pointing at a step the plan skips, and BOTH spellings of
- * a wait.
- *
- * Both spellings, because they are not the same JSON and the difference is a
- * trap. The longhand `- wait: ~` renders as `{ wait: null }`; the shorthand
- * `- wait`, which is what almost everyone actually writes, renders as the bare
- * STRING "wait". A fixture carrying only the object form once let a bug ship
- * that broke every pipeline containing a plain `- wait` — see
- * `__tests__/collect-keys.vitest.ts`.
+ * keyed, a `depends_on` pointing at a step the plan skips, and both spellings of
+ * a wait — `- wait: ~` renders as `{ wait: null }`, `- wait` as the string
+ * "wait". Carrying only the object form once let a bug ship.
  */
 export const RENDERED_PIPELINE = {
   steps: [

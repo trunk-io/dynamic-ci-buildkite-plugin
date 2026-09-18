@@ -161,9 +161,7 @@ describe("apply-skips.jq", () => {
     expect(applySkips({})).toEqual(RENDERED_PIPELINE);
   });
 
-  // REGRESSION, the mutation half of the one in collect-keys.vitest.ts. `has()`
-  // on a string raises the same way `.key` does, so a bare `- wait` anywhere in
-  // the pipeline used to take the whole mutation down with it.
+  // REGRESSION, the mutation half of the one in collect-keys.vitest.ts.
   describe("a shorthand step that renders as a bare string", () => {
     it("passes through untouched, and the steps around it are still skipped", () => {
       const out = applySkips(

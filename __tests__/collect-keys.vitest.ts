@@ -129,15 +129,9 @@ describe("collect-keys.jq with exclude-keys", () => {
     );
   });
 
-  // REGRESSION. A real agent renders the shorthand `- wait` as the bare string
-  // "wait" — only the longhand `- wait: ~` gives `{ wait: null }`. jq raises on
-  // indexing a string, so before this was guarded the program exited non-zero on
-  // any pipeline containing a plain `- wait`, and the plugin fail-opened having
-  // decided nothing. Nearly every real pipeline has one.
-  //
-  // It survived the unit tests because the fixture carried only the object form,
-  // and it was caught by the smoke test the first time it ran on a real agent.
-  // Both spellings are in the fixture now; these pin the shorthand explicitly.
+  // REGRESSION. Unguarded, a bare `- wait` made this program exit non-zero and
+  // the plugin fail open — on nearly every real pipeline. The fixture carried
+  // only the longhand form, so nothing here caught it.
   describe("a shorthand step that renders as a bare string", () => {
     it("does not stop the walk at the top level", () => {
       expect(

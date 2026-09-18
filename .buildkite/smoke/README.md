@@ -17,7 +17,7 @@ was no commit for a pipeline to point at.
 | `verdict.sh`     | Did what ran agree with what was marked                                                           |
 
 `run.sh` and `verdict.sh` each write a JUnit report, and the last step of
-`sample.yml` uploads both to Trunk Flaky Tests in the staging org. That step sits
+`sample.yml` uploads both to Trunk Flaky Tests. That step sits
 there rather than in `smoke.yml` because it is the first point at which both
 reports exist: `run.sh`'s own report only becomes an artifact when its step ends,
 and that step is long over by the time anything in `sample.yml` runs.
@@ -49,16 +49,16 @@ means.
   identical: _the only thing the filter may change is `skip:`_. That is what
   catches a dropped step, a reordered pipeline, a mangled group — without ever
   asserting whether anything was skipped.
-- **Tier 2** — the staging deployment answered at all. This one needs care,
+- **Tier 2** — the service answered at all. This one needs care,
   because with no history nothing is skipped, so **a successful round trip and a
   total outage produce byte-identical output.** stderr is the only thing that
   tells them apart, which is why `debug: true` is on and why the fail-open
   markers are listed explicitly in `run.sh`.
 - **Tier 3** — _what the service decided._ **Never asserted.** A pipeline with no
-  history gets `WORKFLOW_NOT_RECOGNIZED` and nothing is skipped, which is
-  correct. Scoring the plugin on the verdict would make this repository's CI fail
-  whenever the **service** changed — the exact coupling that giving the plugin
-  its own repository was meant to end.
+  history is not recognised and nothing is skipped, which is correct. Scoring the
+  plugin on the verdict would make this repository's CI fail whenever the
+  **service** changed — the exact coupling that giving the plugin its own
+  repository was meant to end.
 
 `verdict.sh` is the assertion that survives the service gaining history. For each
 keyed step it tests an exclusive or: the step recorded that it ran, **xor** the
@@ -71,7 +71,7 @@ anything was skipped does not arise.
   `run.sh` uploads keyed steps into the build it is already running in. Retrying
   the smoke step alone re-uploads the same keys and fails. The keys cannot be
   randomised instead: Dynamic CI's history is keyed on them, and a fresh key per
-  retry would fill the service with garbage.
+  retry would fill the service's history with garbage.
 - **`smoke.yml` has exactly one step, deliberately.** Uploaded steps are inserted
   immediately after the step that uploads them, so the sample lands at the end of
   the tree and nothing can end up blocked behind it. Do not add steps after it —

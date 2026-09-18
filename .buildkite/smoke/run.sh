@@ -7,7 +7,7 @@
 #
 #   Tier 0  the plugin the agent resolved really is this commit's code
 #   Tier 1  invariants that hold whatever the recommendation service says
-#   Tier 2  the staging deployment answered at all
+#   Tier 2  the service answered at all
 #   Tier 3  what the service decided — NEVER asserted, see below
 #
 # Tier 3 is the important omission. A pipeline with no history gets
@@ -343,9 +343,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Tier 2 — the staging deployment answered
+# Tier 2 — the service answered
 # ---------------------------------------------------------------------------
-echo "--- :satellite: tier 2 — staging answered"
+echo "--- :satellite: tier 2 — the service answered"
 
 # The request was built and sent. This much is unconditional: whatever the
 # service says back, failing to get this far is a plugin defect.
@@ -367,7 +367,7 @@ fi
 # Now what it answered. Three cases, and only one of them is a defect.
 if grep -qF "debug · plan" "${OUT}/filter.stderr"; then
     # A plan came back and parsed. This is the full-strength case, and what this
-    # tier becomes permanently once the repository is onboarded in staging.
+    # tier becomes permanently once this repository has CI history.
     pass "a plan came back and parsed"
     if saw_fail_open "${OUT}/filter.stderr"; then
         fail "a plan came back, but the filter still failed open"
@@ -377,19 +377,14 @@ if grep -qF "debug · plan" "${OUT}/filter.stderr"; then
     fi
 elif grep -qF "REPOSITORY_NOT_FOUND" "${OUT}/filter.stderr"; then
     # NOT A FAILURE, and the distinction is the whole reason this branch exists.
-    # A 404 here is the service saying it holds no CI history for this
-    # repository, which is a true statement about a repository that has never
-    # run CI — not a defect in the plugin. Failing on it would make this build
-    # permanently red for a reason no change to this repository could fix.
-    #
-    # It is still real signal: a 404 proves the request was routed,
-    # authenticated and understood. Everything up to the verdict works.
-    #
-    # Onboard trunk-io/dynamic-ci-buildkite-plugin in the staging org and this
-    # branch stops being taken, at which point the assertions above apply in
-    # full, with no change to this file.
+    # The service is saying it holds no CI history for this repository, which is
+    # true of one that has never run CI. Failing on it would make this build
+    # permanently red for a reason no change here could fix — and it is still
+    # real signal, because it proves the request was routed, authenticated and
+    # understood. Once the repository has history this branch stops being taken
+    # and the assertions above apply in full, with no change to this file.
     skip "a plan came back and parsed" \
-        "REPOSITORY_NOT_FOUND: staging holds no CI history for this repository yet. The request was routed, authenticated and understood — a 404 is the service answering, not the plugin failing. Onboard the repo in the staging org and this becomes a full assertion automatically."
+        "the service holds no CI history for this repository yet; the request was routed, authenticated and understood, so this is the service answering rather than the plugin failing"
 else
     # Anything else — a 401, a 5xx, a plan this version cannot read — is a defect
     # or an outage, and either way it belongs in red.

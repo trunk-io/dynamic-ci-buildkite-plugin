@@ -15,10 +15,8 @@ import * as z from "zod";
  * own schema would encode a shape the mutation is specifically designed not to
  * depend on.
  *
- * **A step is not always an object.** A real agent renders the shorthand
- * `- wait` as the bare string `"wait"`. Modelling steps as records only is what
- * hid a bug that broke every pipeline containing one, so the union is not
- * pedantry — it is the fixture telling the truth about what Buildkite emits.
+ * The union is not pedantry: the agent renders `- wait` as a bare string, and
+ * modelling steps as records only is what once hid a bug.
  */
 export const OBJECT_STEP_SCHEMA: z.ZodRecord<z.ZodString, z.ZodUnknown> =
   z.record(z.string(), z.unknown());
