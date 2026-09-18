@@ -1,0 +1,69 @@
+# CI for the Dynamic CI Buildkite plugin.
+#
+# The registered pipeline's own step list is a single
+# `buildkite-agent pipeline upload`, so the steps are reviewed here rather than
+# configured in the Buildkite UI.
+#
+# It deliberately does NOT pipe its own upload through
+# `trunk-dynamic-ci-filter`. Dogfooding here would let a broken change skip the
+# very steps that would have caught it; dogfooding belongs in the smoke test,
+# where the blast radius is a fixture.
+env:
+  # The CLI talks to production by default, so the deployment is named here.
+  TRUNK_PUBLIC_API_ADDRESS: https://api.trunk-staging.io
+  TRUNK_ORG_URL_SLUG: trunk-staging-org
+
+steps:
+  - label: ":trunk: check"
+    key: trunk-check
+    agents: &agents
+      queue: managed
+    timeout_in_minutes: &timeout 15
+    artifact_paths:
+      - trunk-check.out
+    command: .buildkite/steps/trunk-check.sh
+
+  # `soft_fail` is not leniency: it hands the verdict to the upload step below,
+  # which is the only thing that knows which failures are quarantined. Without
+  # it a quarantined flake reddens the build before Trunk is ever asked.
+  - label: ":vitest: typecheck + unit tests"
+    key: tests
+    agents: *agents
+    timeout_in_minutes: *timeout
+    soft_fail: true
+    artifact_paths:
+      - junit.xml
+    command: .buildkite/steps/unit-tests.sh
+
+  # `allow_dependency_failure` is the whole point: a failing suite is exactly
+  # when the results matter most, and a test report that only uploads when the
+  # tests passed cannot detect a flake.
+  - label: ":trunk: upload unit test results"
+    key: upload-unit-tests
+    agents: *agents
+    timeout_in_minutes: *timeout
+    depends_on: tests
+    allow_dependency_failure: true
+    secrets:
+      - TRUNK_STAGING_ORG_API_TOKEN
+    env:
+      # The smoke assertions have their own collection, in smoke/sample.yml:
+      # a unit test flaking and a smoke assertion flaking are different things
+      # to be told about, and one collection would average them into neither.
+      TRUNK_TEST_COLLECTION_ID: QgnAERiY
+    commands:
+      - buildkite-agent artifact download junit.xml .
+      - curl -fL --retry 3 "https://github.com/trunk-io/analytics-cli/releases/latest/download/trunk-analytics-cli-x86_64-unknown-linux.tar.gz" | tar -xz && chmod +x trunk-analytics-cli
+      - ./trunk-analytics-cli upload --junit-paths "junit.xml" --org-url-slug "$$TRUNK_ORG_URL_SLUG" --token "$$TRUNK_STAGING_ORG_API_TOKEN" --test-collection-id "$$TRUNK_TEST_COLLECTION_ID"
+
+  - label: ":buildkite: plugin lint"
+    key: plugin-lint
+    agents: *agents
+    timeout_in_minutes: *timeout
+    command: .buildkite/steps/plugin-lint.sh
+
+  - label: ":lock: file modes"
+    key: file-modes
+    agents: *agents
+    timeout_in_minutes: *timeout
+    command: .buildkite/steps/file-modes.sh

@@ -1,0 +1,57 @@
+# Move a major-version alias tag onto a release tag.
+#
+# Kept because it is occasionally useful for our own pipelines and fixtures, but
+# NOT the reference customers are pointed at. Buildkite agents cache a plugin's
+# checkout by the ref named in the pipeline, and
+# `BUILDKITE_PLUGINS_ALWAYS_CLONE_FRESH` is off by default — so an agent that has
+# already checked out a moving tag keeps what it has, and force-moving that tag
+# never reaches it. A customer running a mix of long-lived and ephemeral agents
+# would then be running two versions of this plugin at once, with nothing in the
+# log to say which. The README pins exact versions for that reason.
+#
+# This is the repository's only GitHub Actions workflow: everything that gates a
+# pull request runs on Buildkite (.buildkite/). Moving a git ref is a GitHub
+# operation, and doing it from Buildkite would mean putting a GitHub credential
+# into the cluster to replace one GitHub hands us for free.
+name: Update moving tag release version
+run-name: Move ${{ github.event.inputs.major_version }} to ${{ github.event.inputs.target }}
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        type: string
+        description: The release tag to point at (e.g. v1.2.3)
+        required: true
+      major_version:
+        type: choice
+        description: Target major version
+        options:
+          - v1
+concurrency: ${{ github.workflow }}
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Git config
+        run: |
+          git config user.name trunkio
+          git config user.email github-actions@trunk.io
+
+      - name: Tag new target
+        run: git tag -f "${MAJOR_VERSION}" "${TARGET}"
+        env:
+          MAJOR_VERSION: ${{ github.event.inputs.major_version }}
+          TARGET: ${{ github.event.inputs.target }}
+
+      - name: Push new tag
+        run: git push origin "${MAJOR_VERSION}" --force
+        env:
+          MAJOR_VERSION: ${{ github.event.inputs.major_version }}

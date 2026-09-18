@@ -1,0 +1,61 @@
+version: 0.1
+cli:
+  version: 1.25.0
+plugins:
+  sources:
+    - id: trunk
+      ref: v1.7.4
+      uri: https://github.com/trunk-io/plugins
+runtimes:
+  enabled:
+    - node@25.9.0
+    - python@3.10.8
+lint:
+  enabled:
+    - actionlint@1.7.8
+    - checkov@3.2.494
+    - eslint@9.39.1
+    - git-diff-check
+    - markdownlint@0.46.0
+    - osv-scanner@2.3.0
+    - prettier@3.6.2
+    - shellcheck@0.11.0
+    - shfmt@3.6.0
+    - sort-package-json@3.4.0
+    - trufflehog@3.91.1
+    - trunk-toolbox@0.5.4
+    - yamllint@1.37.1
+  ignore:
+    # 4.8 MB of vendored jq binaries. Nothing here has an opinion worth hearing
+    # about a stripped ELF, and trufflehog and osv-scanner are slow over them.
+    - linters: [ALL]
+      paths:
+        - vendor/jq-*
+    # trunk runs each linter over a copy in a temp directory, so the flat
+    # config's own `allowDefaultProject: ["eslint.config.mjs"]` — a path relative
+    # to tsconfigRootDir — never matches, and the file fails to parse rather than
+    # failing to lint. `pnpm lint`, which .buildkite/steps/trunk-check.sh runs
+    # from the repo root, covers this file properly.
+    - linters: [eslint]
+      paths:
+        - eslint.config.mjs
+    # CKV_GHA_7 wants every workflow_dispatch input list to be empty. This one
+    # legitimately takes the tag to move and the alias to move it to, and it is
+    # already doing the thing the rule is a proxy for: both inputs reach the run
+    # step through `env:` rather than being interpolated into the script body, so
+    # there is no expansion for a value to inject into. Dispatching it at all
+    # needs write access to the repository.
+    - linters: [checkov]
+      paths:
+        - .github/workflows/release.yml
+actions:
+  enabled:
+    - trunk-announce
+    - trunk-check-pre-push
+    - trunk-fmt-pre-commit
+    - trunk-upgrade-available
+tools:
+  runtimes:
+    - node
+  enabled:
+    - pnpm@10.23.0
