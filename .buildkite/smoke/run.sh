@@ -22,12 +22,65 @@ readonly OUT="${PWD}/smoke-out"
 readonly SAMPLE=".buildkite/smoke/sample.yml"
 mkdir -p "${OUT}"
 
+# Every assertion is reported twice: to the build log for a human, and into a
+# JUnit report that the `upload-smoke-results` step sends to Trunk Flaky Tests.
+#
+# THE FIRST ARGUMENT IS A STABLE NAME and the second is optional detail. That
+# split is not cosmetic: Flaky Tests keys a test on its name, so a name carrying
+# an elapsed time or an exit code would register a brand new test on every run
+# and no flake could ever be detected. Variable text goes in the detail.
 failures=0
-pass() { echo "  ✔ $1"; }
-fail() {
-    echo "  ✘ $1" >&2
-    failures=$((failures + 1))
+JUNIT_CASES=""
+CASE_STARTED="$(date +%s.%N)"
+
+xml_escape() {
+    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
 }
+
+record() {
+    local name="$1" outcome="$2" detail="$3" body="" now elapsed
+    now="$(date +%s.%N)"
+    elapsed="$(awk -v a="${CASE_STARTED}" -v b="${now}" 'BEGIN { printf "%.3f", b - a }')"
+    CASE_STARTED="${now}"
+    case "${outcome}" in
+    fail) body="<failure message=\"$(xml_escape "${detail}")\"/>" ;;
+    skip) body="<skipped message=\"$(xml_escape "${detail}")\"/>" ;;
+    esac
+    JUNIT_CASES="${JUNIT_CASES}    <testcase classname=\"smoke\" name=\"$(xml_escape "${name}")\" time=\"${elapsed}\">${body}</testcase>
+"
+}
+
+pass() {
+    echo "  ✔ $1${2:+ — $2}"
+    record "$1" pass ""
+}
+
+fail() {
+    echo "  ✘ $1${2:+ — $2}" >&2
+    failures=$((failures + 1))
+    record "$1" fail "${2-}"
+}
+
+# Not a pass and not a failure: something true about the environment that no
+# change to this repository could alter. It reaches Flaky Tests as a skip.
+skip() {
+    echo "  ⚠ $1${2:+ — $2}"
+    record "$1" skip "${2-}"
+}
+
+write_junit() {
+    local total
+    total="$(grep -c "<testcase" <<<"${JUNIT_CASES}")"
+    {
+        echo '<?xml version="1.0" encoding="UTF-8"?>'
+        echo "<testsuites>"
+        echo "  <testsuite name=\"dynamic-ci-buildkite-plugin smoke\" tests=\"${total}\" failures=\"${failures}\">"
+        printf '%s' "${JUNIT_CASES}"
+        echo "  </testsuite>"
+        echo "</testsuites>"
+    } >"${OUT}/junit-smoke.xml"
+}
+trap write_junit EXIT
 
 # A fail-open is invisible in stdout: with no history the service skips nothing,
 # so a successful round trip and a total outage produce the SAME pipeline. These
@@ -101,9 +154,9 @@ fi
 trunk-dynamic-ci-filter <"${SAMPLE}" >"${OUT}/after.json" 2>"${OUT}/filter.stderr"
 filter_rc=$?
 if [[ ${filter_rc} -eq 0 ]]; then
-    pass "the filter exited 0"
+    pass "the filter exits 0"
 else
-    fail "the filter exited ${filter_rc}"
+    fail "the filter exits 0" "exited ${filter_rc}"
 fi
 
 # WHICH CONTRACT APPLIES depends on which path the filter took, and conflating
@@ -206,18 +259,18 @@ assert_fails_open() {
     LAST_ELAPSED=$((SECONDS - started))
 
     if [[ ${rc} -ne 0 ]]; then
-        fail "${label}: exited ${rc}, should fail open with 0"
+        fail "${label}" "exited ${rc}; a fail-open must exit 0"
         return 1
     fi
     if ! cmp -s "${SAMPLE}" "${out}"; then
-        fail "${label}: output is not byte-identical to the input"
+        fail "${label}" "output is not byte-identical to the input"
         return 1
     fi
     if ! saw_fail_open "${err}"; then
-        fail "${label}: failed open silently, with no explanation on stderr"
+        fail "${label}" "failed open silently, with no explanation on stderr"
         return 1
     fi
-    pass "${label}: exit 0, byte-identical, explained on stderr (${LAST_ELAPSED}s)"
+    pass "${label}" "exit 0, byte-identical, explained on stderr (${LAST_ELAPSED}s)"
 }
 
 assert_fails_open "fail open on a rejected token" \
@@ -232,9 +285,9 @@ if assert_fails_open "fail open on an unreachable API" \
     "${OUT}/unreachable.out" "${OUT}/unreachable.stderr" \
     TRUNK_PUBLIC_API_ADDRESS=http://127.0.0.1:9; then
     if [[ ${LAST_ELAPSED} -lt 30 ]]; then
-        pass "the unreachable API failed open in ${LAST_ELAPSED}s, under the 30s bound"
+        pass "the unreachable API fails open within 30s" "took ${LAST_ELAPSED}s"
     else
-        fail "the unreachable API took ${LAST_ELAPSED}s to fail open; the timeout has regressed"
+        fail "the unreachable API fails open within 30s" "took ${LAST_ELAPSED}s; the timeout has regressed"
     fi
 fi
 
@@ -335,10 +388,8 @@ elif grep -qF "REPOSITORY_NOT_FOUND" "${OUT}/filter.stderr"; then
     # Onboard trunk-io/dynamic-ci-buildkite-plugin in the staging org and this
     # branch stops being taken, at which point the assertions above apply in
     # full, with no change to this file.
-    echo "  ⚠ staging holds no CI history for this repository yet (REPOSITORY_NOT_FOUND)."
-    echo "    The request was routed, authenticated and understood — a 404 is the"
-    echo "    service answering, not the plugin failing. Onboard the repo in the"
-    echo "    staging org and this becomes a full assertion automatically."
+    skip "a plan came back and parsed" \
+        "REPOSITORY_NOT_FOUND: staging holds no CI history for this repository yet. The request was routed, authenticated and understood — a 404 is the service answering, not the plugin failing. Onboard the repo in the staging org and this becomes a full assertion automatically."
 else
     # Anything else — a 401, a 5xx, a plan this version cannot read — is a defect
     # or an outage, and either way it belongs in red.
