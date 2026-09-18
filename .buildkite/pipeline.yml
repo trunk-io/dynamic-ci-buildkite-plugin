@@ -1,0 +1,46 @@
+# CI for the Dynamic CI Buildkite plugin.
+#
+# The registered pipeline's own step list is a single
+# `buildkite-agent pipeline upload`, so the steps are reviewed here rather than
+# configured in the Buildkite UI.
+#
+# This pipeline holds NO secrets. Everything that needs a Trunk API token lives
+# in the smoke pipeline (.buildkite/smoke.yml), which keeps this one movable to a
+# secret-free cluster if we ever want CI on fork pull requests.
+#
+# It also deliberately does NOT pipe its own upload through
+# `trunk-dynamic-ci-filter`. Dogfooding here would let a broken change skip the
+# very steps that would have caught it; dogfooding belongs in the smoke test,
+# where the blast radius is a fixture.
+#
+# Four independent steps, no `depends_on` — nothing here produces an input to
+# anything else.
+steps:
+  - label: ":trunk: check"
+    key: trunk-check
+    agents: &agents
+      queue: managed
+    timeout_in_minutes: &timeout 15
+    artifact_paths:
+      - trunk-check.out
+    command: .buildkite/steps/trunk-check.sh
+
+  - label: ":vitest: typecheck + unit tests"
+    key: unit-tests
+    agents: *agents
+    timeout_in_minutes: *timeout
+    artifact_paths:
+      - junit.xml
+    command: .buildkite/steps/unit-tests.sh
+
+  - label: ":buildkite: plugin lint"
+    key: plugin-lint
+    agents: *agents
+    timeout_in_minutes: *timeout
+    command: .buildkite/steps/plugin-lint.sh
+
+  - label: ":lock: file modes"
+    key: file-modes
+    agents: *agents
+    timeout_in_minutes: *timeout
+    command: .buildkite/steps/file-modes.sh

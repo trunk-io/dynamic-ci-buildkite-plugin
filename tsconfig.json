@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    /* Language and environment: the tests run under vitest on node. */
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext"],
+    "types": ["node"],
+
+    /* Type checking. These deliberately mirror the strictness the wire contract is
+       held to upstream, so a synced file compiles identically on both sides —
+       notably `exactOptionalPropertyTypes: false`, `noPropertyAccessFromIndexSignature`
+       (hence `process.env["X"]`) and `isolatedDeclarations` (hence the explicit
+       annotations on the schema exports). Changing one desyncs the two copies. */
+    "strict": true,
+    "exactOptionalPropertyTypes": false,
+    "erasableSyntaxOnly": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "useUnknownInCatchVariables": true,
+    "isolatedModules": true,
+    "isolatedDeclarations": true,
+    "verbatimModuleSyntax": true,
+
+    /* Type-check only. `declaration` has to be on for `isolatedDeclarations` to be
+       legal, but nothing is emitted. */
+    "declaration": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["__tests__/**/*.ts", "src/schema/**/*.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "coverage"]
+}
