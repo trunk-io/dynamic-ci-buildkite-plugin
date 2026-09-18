@@ -1,16 +1,11 @@
 #!/usr/bin/env bash
-# `buildkite/plugin-linter` — the structural check the Buildkite plugins
-# directory expects of a published plugin.
+# The structural check the Buildkite plugins directory expects.
 #
-# `--id trunk-io/dynamic-ci` is the short reference consumers write. The linter
-# resolves it the way Buildkite does (appending `-buildkite-plugin`) and
-# cross-checks it against the `plugins:` examples in README.md, so this also
-# catches a README that documents a reference nobody can use — which is the
-# entire reason this plugin got its own repository.
+# `--id` is the short reference consumers write. The linter resolves it the way
+# Buildkite does and cross-checks it against the `plugins:` examples in
+# README.md, so it also catches a README documenting a reference nobody can use.
 #
-# We deliberately do NOT also adopt `buildkite/plugin-tester` (BATS). The vitest
-# suite already drives the real hooks and the real jq out of process; a BATS
-# harness would be a second, weaker one over the same surface. See CONTRIBUTING.md.
+# On not adopting `buildkite/plugin-tester` as well, see CONTRIBUTING.md.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."

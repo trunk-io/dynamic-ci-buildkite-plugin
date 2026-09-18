@@ -237,7 +237,7 @@ the critical path of every build; the plugin will not be what breaks one.
 pnpm test
 
 # the request body, without making a call — the shape the tests validate
-# against the engine's own schema
+# against the service’s own schema
 lib/request-plan.sh --print-body '["unit-tests"]'
 ```
 

@@ -9,8 +9,7 @@
 # very steps that would have caught it; dogfooding belongs in the smoke test,
 # where the blast radius is a fixture.
 env:
-  # Test results go to the STAGING deployment, so the CLI needs its host
-  # overridden — it talks to production by default.
+  # The CLI talks to production by default, so the deployment is named here.
   TRUNK_PUBLIC_API_ADDRESS: https://api.trunk-staging.io
   TRUNK_ORG_URL_SLUG: trunk-staging-org
 
@@ -48,10 +47,9 @@ steps:
     secrets:
       - TRUNK_STAGING_ORG_API_TOKEN
     env:
-      # The unit suite's collection in the staging org. The smoke assertions have
-      # their own, in .buildkite/smoke/sample.yml — same org, separate history,
-      # because a smoke assertion flaking and a unit test flaking are different
-      # things to be told about.
+      # The smoke assertions have their own collection, in smoke/sample.yml:
+      # a unit test flaking and a smoke assertion flaking are different things
+      # to be told about, and one collection would average them into neither.
       TRUNK_TEST_COLLECTION_ID: QgnAERiY
     commands:
       - buildkite-agent artifact download junit.xml .

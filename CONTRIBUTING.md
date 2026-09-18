@@ -23,7 +23,7 @@ trunk check      # shellcheck, shfmt, prettier, markdownlint, yamllint
 
 ```sh
 # The request body, without making a call — the exact shape the tests validate
-# against the engine's own schema.
+# against the service's own schema.
 lib/request-plan.sh --print-body '["unit-tests"]'
 ```
 
@@ -70,9 +70,9 @@ docker run --rm -v "$PWD:/plugin:ro" buildkite/plugin-linter --id trunk-io/dynam
 
 ## The synced schema
 
-`src/schema/` is a projection of Trunk's internal wire contract. **Do not
-hand-edit it.** Changing the contract means changing it in the monorepo; a sync
-job then opens a pull request here and against
+`src/schema/` is a projection of the wire contract the plugin speaks to the Trunk
+recommendation service. **Do not hand-edit it.** The contract changes upstream; a
+sync job then opens a pull request here and against
 [`trunk-io/dynamic-ci`](https://github.com/trunk-io/dynamic-ci), the Dynamic CI
 GitHub Action, which vendors the same copy.
 
@@ -80,8 +80,9 @@ Nothing the plugin _runs_ imports those files — the request body is built in
 `lib/request-body.jq`. They exist so the tests can check that body against the
 real contract instead of a restatement of it.
 
-`tsconfig.json`'s strictness mirrors the monorepo's on purpose, so a synced file
-compiles identically on both sides. Relaxing a flag there desyncs the two copies.
+`tsconfig.json`'s strictness mirrors the upstream definition's on purpose, so a
+synced file compiles identically on both sides. Relaxing a flag there desyncs the
+two copies.
 
 ## The vendored jq
 
@@ -113,21 +114,20 @@ Two pipelines:
   typecheck, the suite, the plugin linter, and a check that every executable kept
   its exec bit.
 - **`dynamic-ci-buildkite-plugin-smoke`** — `.buildkite/smoke.yml`. The plugin
-  resolved at the commit under test and run against a real agent and the staging
+  resolved at the commit under test and run against a real agent and a live
   API. See [`.buildkite/smoke/README.md`](.buildkite/smoke/README.md), which is
   also the runbook — in particular, **retry the build, not the smoke step**.
 
-**Pull requests from forks do not build.** The smoke pipeline needs a real Trunk
-API token, this repository is public, and a fork pull request is code we have not
+**Pull requests from forks do not build.** Both pipelines carry a real Trunk API
+token, this repository is public, and a fork pull request is code we have not
 reviewed yet — so `build_pull_request_forks` is off, and a fork PR gets no status
 at all. To run CI on an outside contribution, push the commits to a branch in
 this repository and open the pull request from there.
 
 ### Test results
 
-Both pipelines report to **Trunk Flaky Tests in the staging org**
-(`trunk-staging-org`), each into its own test collection: one for the unit suite,
-one for the smoke assertions.
+Both pipelines report to Trunk Flaky Tests, each into its own test collection:
+one for the unit suite, one for the smoke assertions.
 
 The upload is always a **separate pipeline step** from the step that runs the
 tests, and that separation is load-bearing twice over:
@@ -140,9 +140,9 @@ tests, and that separation is load-bearing twice over:
   gives up both properties.
 - It keeps the runner scripts about running tests.
 
-Uploads go to staging, so the step sets `TRUNK_PUBLIC_API_ADDRESS` (the CLI talks
-to production by default) and takes the token from the `TRUNK_STAGING_ORG_API_TOKEN`
-cluster secret.
+The target deployment, org slug and token are set on the upload step in
+`.buildkite/`; `TRUNK_PUBLIC_API_ADDRESS` selects the deployment, since the CLI
+talks to production by default.
 
 The smoke assertions are reported as tests too. `run.sh` and `verdict.sh` each
 write a JUnit report, which is why their `pass`/`fail` helpers take a **stable
