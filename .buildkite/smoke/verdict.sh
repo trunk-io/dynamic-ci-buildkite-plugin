@@ -14,12 +14,54 @@ set -uo pipefail
 
 readonly KEYED_STEPS=(alpha beta gamma)
 
+# As in run.sh: the first argument is a STABLE name, the second optional detail.
+# Flaky Tests keys a test on its name, so variable text must not appear in one.
+readonly OUT="${PWD}/smoke-out"
 failures=0
-pass() { echo "  ✔ $1"; }
-fail() {
-    echo "  ✘ $1" >&2
-    failures=$((failures + 1))
+JUNIT_CASES=""
+CASE_STARTED="$(date +%s.%N)"
+
+xml_escape() {
+    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
 }
+
+record() {
+    local name="$1" outcome="$2" detail="$3" body="" now elapsed
+    now="$(date +%s.%N)"
+    elapsed="$(awk -v a="${CASE_STARTED}" -v b="${now}" 'BEGIN { printf "%.3f", b - a }')"
+    CASE_STARTED="${now}"
+    if [[ ${outcome} == fail ]]; then
+        body="<failure message=\"$(xml_escape "${detail}")\"/>"
+    fi
+    JUNIT_CASES="${JUNIT_CASES}    <testcase classname=\"smoke.verdict\" name=\"$(xml_escape "${name}")\" time=\"${elapsed}\">${body}</testcase>
+"
+}
+
+pass() {
+    echo "  ✔ $1${2:+ — $2}"
+    record "$1" pass ""
+}
+
+fail() {
+    echo "  ✘ $1${2:+ — $2}" >&2
+    failures=$((failures + 1))
+    record "$1" fail "${2-}"
+}
+
+write_junit() {
+    local total
+    total="$(grep -c "<testcase" <<<"${JUNIT_CASES}")"
+    mkdir -p "${OUT}"
+    {
+        echo '<?xml version="1.0" encoding="UTF-8"?>'
+        echo "<testsuites>"
+        echo "  <testsuite name=\"dynamic-ci-buildkite-plugin smoke verdict\" tests=\"${total}\" failures=\"${failures}\">"
+        printf '%s' "${JUNIT_CASES}"
+        echo "  </testsuite>"
+        echo "</testsuites>"
+    } >"${OUT}/junit-verdict.xml"
+}
+trap write_junit EXIT
 
 echo "--- :inbox_tray: fetching the filtered pipeline"
 buildkite-agent artifact download "smoke-out/after.json" . || {
@@ -47,15 +89,15 @@ echo "--- :mag: what ran vs what was marked"
 for name in "${KEYED_STEPS[@]}"; do
     if ran "${name}"; then
         if marked_skipped "${name}"; then
-            fail "${name}: marked skipped, but it ran anyway"
+            fail "${name} ran xor was marked skipped" "marked skipped, but it ran anyway"
         else
-            pass "${name}: not marked, and it ran"
+            pass "${name} ran xor was marked skipped" "not marked, and it ran"
         fi
     else
         if marked_skipped "${name}"; then
-            pass "${name}: marked skipped, and it did not run"
+            pass "${name} ran xor was marked skipped" "marked skipped, and it did not run"
         else
-            fail "${name}: never ran, and was never marked skipped"
+            fail "${name} ran xor was marked skipped" "never ran, and was never marked skipped"
         fi
     fi
 done
@@ -64,9 +106,9 @@ done
 # never permitted to skip a step it was not given a key for. No plan can reach
 # this one, so no plan is an excuse for it not running.
 if ran unkeyed; then
-    pass "the unkeyed step ran, as it must"
+    pass "the unkeyed step always runs"
 else
-    fail "the unkeyed step did not run — the plugin skipped a step with no key"
+    fail "the unkeyed step always runs" "it did not run — the plugin skipped a step with no key"
 fi
 
 if [[ ${failures} -ne 0 ]]; then

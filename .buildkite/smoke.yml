@@ -14,6 +14,10 @@ steps:
     agents:
       queue: managed
     timeout_in_minutes: 20
+    # The assertions' own JUnit report rides out with the rest of the diagnostics.
+    # The step that uploads it to Trunk Flaky Tests lives at the end of
+    # .buildkite/smoke/sample.yml, which is the first point where both this
+    # report and the verdict's exist.
     artifact_paths:
       - smoke-out/*
     env:

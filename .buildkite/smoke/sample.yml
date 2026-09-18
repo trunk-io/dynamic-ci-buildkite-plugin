@@ -57,6 +57,40 @@ steps:
   - wait
 
   - label: ":mag: smoke verdict"
+    key: smoke-verdict
     agents: *agents
     timeout_in_minutes: *timeout
+    soft_fail: true
+    artifact_paths:
+      - smoke-out/junit-verdict.xml
     command: .buildkite/smoke/verdict.sh
+
+  # The upload lives HERE, at the end of the pipeline run.sh uploads, rather than
+  # in smoke.yml — because this is the only point at which both reports exist.
+  # run.sh's own report is uploaded as an artifact when its step ends, and that
+  # step is already over by the time anything here runs.
+  #
+  # `allow_dependency_failure`, for the reason it always is: a failing assertion
+  # is exactly the result worth reporting, and an upload that only runs on
+  # success cannot detect a flake.
+  - label: ":trunk: upload smoke test results"
+    key: upload-smoke-results
+    agents: *agents
+    timeout_in_minutes: *timeout
+    depends_on:
+      - smoke-verdict
+    allow_dependency_failure: true
+    secrets:
+      - TRUNK_STAGING_ORG_API_TOKEN
+    env:
+      TRUNK_PUBLIC_API_ADDRESS: https://api.trunk-staging.io
+      TRUNK_ORG_URL_SLUG: trunk-staging-org
+      # TODO: replace with the smoke-test collection created in the staging org.
+      # Until it is a real id the upload is skipped rather than attempted, so a
+      # placeholder does not redden every build.
+      TRUNK_TEST_COLLECTION_ID: REPLACE_ME
+    commands:
+      - if [ "$$TRUNK_TEST_COLLECTION_ID" = "REPLACE_ME" ]; then echo "^^^ +++"; echo "TRUNK_TEST_COLLECTION_ID is still the placeholder — create the smoke-test collection in the staging org and set it in .buildkite/smoke/sample.yml. Results are NOT being uploaded."; exit 0; fi
+      - buildkite-agent artifact download "smoke-out/junit-*.xml" .
+      - curl -fL --retry 3 "https://github.com/trunk-io/analytics-cli/releases/latest/download/trunk-analytics-cli-x86_64-unknown-linux.tar.gz" | tar -xz && chmod +x trunk-analytics-cli
+      - ./trunk-analytics-cli upload --junit-paths "smoke-out/junit-*.xml" --org-url-slug "$$TRUNK_ORG_URL_SLUG" --token "$$TRUNK_STAGING_ORG_API_TOKEN" --test-collection-id "$$TRUNK_TEST_COLLECTION_ID"

@@ -16,6 +16,17 @@ was no commit for a pipeline to point at.
 | `sample-step.sh` | One sample step: records that it ran, checks the interpolation canary                             |
 | `verdict.sh`     | Did what ran agree with what was marked                                                           |
 
+`run.sh` and `verdict.sh` each write a JUnit report, and the last step of
+`sample.yml` uploads both to Trunk Flaky Tests in the staging org. That step sits
+there rather than in `smoke.yml` because it is the first point at which both
+reports exist: `run.sh`'s own report only becomes an artifact when its step ends,
+and that step is long over by the time anything in `sample.yml` runs.
+
+**`pass` and `fail` take a stable name first and variable detail second.** Flaky
+Tests keys a test on its name, so a name carrying an elapsed time or an exit code
+would register a brand new test on every run and no flake could ever be
+detected.
+
 ## How it tests _this_ commit
 
 `buildkite-agent pipeline upload` interpolates the YAML **before** plugins are
@@ -63,7 +74,9 @@ anything was skipped does not arise.
   retry would fill the service with garbage.
 - **`smoke.yml` has exactly one step, deliberately.** Uploaded steps are inserted
   immediately after the step that uploads them, so the sample lands at the end of
-  the tree and nothing can end up blocked behind it. Do not add steps after it.
+  the tree and nothing can end up blocked behind it. Do not add steps after it —
+  anything that has to run after the sample belongs at the end of `sample.yml`,
+  which is where the results upload lives.
 - **A broken `plugin.yml` fails during plugin _resolution_,** before `run.sh`
   runs, and surfaces as an agent error rather than an assertion failure. Do not
   go hunting for a bug in `run.sh` when that happens.
