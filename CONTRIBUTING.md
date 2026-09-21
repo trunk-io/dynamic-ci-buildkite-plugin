@@ -65,8 +65,11 @@ which checks something the vitest suite cannot — that `plugin.yml` and the
 README's `plugins:` examples are structurally valid and mutually consistent:
 
 ```sh
-docker run --rm -v "$PWD:/plugin:ro" buildkite/plugin-linter --id trunk-io/dynamic-ci
+docker run --rm -v "$PWD:/plugin:ro" buildkite/plugin-linter --id trunk-io/dynamic-ci --skip-invalid
 ```
+
+`--skip-invalid` is for the `#v<version>` placeholder the README writes in place
+of a pinned tag; `.buildkite/steps/plugin-lint.sh` says why in full.
 
 ## The synced schema
 
@@ -154,8 +157,9 @@ be found.
 ## Releasing
 
 1. Draft a GitHub release with a new tag, `vX.Y.Z`, and generate notes.
-2. Update the pinned refs in `README.md` if the release is one customers should
-   move to.
+
+There is no second step: `README.md` writes `#v<version>` rather than a pinned
+ref and points at the releases page, so a release does not touch it.
 
 Tags are immutable as far as customers are concerned — see the Versioning section
 of `README.md` for why a moving alias behaves worse on Buildkite than it does on
