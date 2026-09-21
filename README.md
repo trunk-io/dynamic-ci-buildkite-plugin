@@ -21,7 +21,7 @@ steps:
         | trunk-dynamic-ci-filter \
         | buildkite-agent pipeline upload
     plugins:
-      - trunk-io/dynamic-ci#v0.1.0: ~
+      - trunk-io/dynamic-ci#v<version>: ~
 ```
 
 ```yaml
@@ -37,8 +37,14 @@ steps:
         | trunk-dynamic-ci-filter \
         | buildkite-agent pipeline upload
     plugins:
-      - trunk-io/dynamic-ci#v0.1.0: ~
+      - trunk-io/dynamic-ci#v<version>: ~
 ```
+
+Throughout this README, `v<version>` stands for the release you are pinning —
+replace it with an exact tag from
+[Releases](https://github.com/trunk-io/dynamic-ci-buildkite-plugin/releases),
+for example `#v0.1.0`. See [Versioning](#versioning) for why the pin should be
+exact.
 
 The plugin contributes one thing: the `trunk-dynamic-ci-filter` command, put on
 your `PATH` for the duration of the step. It reads a pipeline on stdin — JSON or
@@ -84,7 +90,7 @@ Two ways to say it:
 
 ```yaml
 plugins:
-  - trunk-io/dynamic-ci#v0.1.0:
+  - trunk-io/dynamic-ci#v<version>:
       exclude-keys: deploy-master,publish-release
 ```
 
@@ -111,7 +117,7 @@ untouched:
       | trunk-dynamic-ci-filter \
       | buildkite-agent pipeline upload
   plugins:
-    - trunk-io/dynamic-ci#v0.1.0:
+    - trunk-io/dynamic-ci#v<version>:
         only-keys: e2e
 ```
 
@@ -136,7 +142,7 @@ gets you a real skip:
   secrets:
     - TRUNK_TOKEN
   plugins:
-    - trunk-io/dynamic-ci#v0.1.0:
+    - trunk-io/dynamic-ci#v<version>:
         mode: step
 ```
 
@@ -217,7 +223,7 @@ whether the repository and pipeline resolved to what you expected, whether
 
 ```yaml
 plugins:
-  - trunk-io/dynamic-ci#v0.1.0:
+  - trunk-io/dynamic-ci#v<version>:
       debug: true
 ```
 
@@ -255,5 +261,11 @@ into both from the same upstream definition. They release independently.
 **Pin an exact version.** Buildkite agents cache a plugin's checkout by the ref
 you name, and `BUILDKITE_PLUGINS_ALWAYS_CLONE_FRESH` is off by default — so an
 agent that has already checked out a moving tag keeps what it has, and moving
-that tag does not reach it. Pin `#v0.1.0`, not a major alias and not `#main`, and
-a version you audited is the version that runs.
+that tag does not reach it. Pin one exact release tag — `#v1.2.3`, the form the
+examples above write as `#v<version>` — not a major alias and not `#main`, and a
+version you audited is the version that runs. A full commit SHA works too and is
+equally immutable, if you prefer naming one.
+
+The current release is on the
+[Releases](https://github.com/trunk-io/dynamic-ci-buildkite-plugin/releases)
+page.
