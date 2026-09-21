@@ -16,7 +16,7 @@ const AGENT_ENV = {
   BUILDKITE_COMMIT: "9f2c1b7c2b4c9d1e0a3f5b6c7d8e9f0a1b2c3d4e",
   BUILDKITE_BRANCH: "feature/widget-cache",
   BUILDKITE_PULL_REQUEST: "4213",
-  BUILDKITE_BUILD_ID: "01a0a151-99d4-4097-8806-a837f0830d9d",
+  BUILDKITE_BUILD_NUMBER: "13083",
   BUILDKITE_RETRY_COUNT: "0",
   BUILDKITE_BUILD_CREATOR: "octocat",
   BUILDKITE_SOURCE: "webhook",
@@ -99,7 +99,7 @@ describe("the plan request body", () => {
       commitSha: AGENT_ENV.BUILDKITE_COMMIT,
       branch: "feature/widget-cache",
       prNumber: 4213,
-      runId: AGENT_ENV.BUILDKITE_BUILD_ID,
+      runId: AGENT_ENV.BUILDKITE_BUILD_NUMBER,
       runAttempt: 1,
       triggeringActor: "octocat",
       eventName: "webhook",
@@ -109,15 +109,16 @@ describe("the plan request body", () => {
     });
   });
 
-  // `BUILDKITE_RETRY_COUNT` counts from 0 and `runAttempt` from 1. Note what this
-  // number means here: the retry count of the UPLOAD step, not a build attempt —
-  // Buildkite has no build-level attempt, and a rebuild is a new build id.
-  it("counts runAttempt from one", () => {
+  // `BUILDKITE_RETRY_COUNT` is how many times THIS JOB has been retried, so in
+  // step mode two steps of one build report different counts. Deriving the run's
+  // attempt from it split one build's plans across several attempts of a run that
+  // only ever had one.
+  it("reports the same run attempt however often the upload step is retried", () => {
     const body = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(
       printBody({ env: { BUILDKITE_RETRY_COUNT: "2" } }),
     );
 
-    expect(body.runAttempt).toBe(3);
+    expect(body.runAttempt).toBe(1);
   });
 
   it("sends a null prNumber when the build is not a pull request", () => {

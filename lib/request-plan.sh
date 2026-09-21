@@ -95,11 +95,16 @@ dci_pr_number() {
 dci_build_body() {
     local jq_bin="$1" job_keys="$2" host="$3" repo_path="$4"
     local owner="${repo_path%%/*}" name="${repo_path#*/}"
-    local retry="${BUILDKITE_RETRY_COUNT:-0}"
 
     # Built by jq rather than printf: every value here is attacker-adjacent (a
     # branch name, a commit author) and jq escapes them correctly by construction.
     # `--arg` is always a string; the nulls and numbers are shaped below.
+    #
+    # `runId` is the build number, not `BUILDKITE_BUILD_ID`: the plan is scored
+    # against the build's spans, which carry `buildkite.build.number` and never the
+    # build UUID. `runAttempt` is constant because Buildkite has no build-level
+    # attempt — a rebuild is a new build — and `BUILDKITE_RETRY_COUNT` counts
+    # retries of THIS JOB, so in step mode each step would send a different one.
     "${jq_bin}" -n \
         --arg host "${host}" \
         --arg owner "${owner}" \
@@ -108,8 +113,8 @@ dci_build_body() {
         --arg baseSha "$(dci_base_sha)" \
         --arg branch "${BUILDKITE_BRANCH-}" \
         --arg prNumber "$(dci_pr_number)" \
-        --arg runId "${BUILDKITE_BUILD_ID-}" \
-        --argjson runAttempt "$((retry + 1))" \
+        --arg runId "${BUILDKITE_BUILD_NUMBER-}" \
+        --argjson runAttempt 1 \
         --arg triggeringActor "${BUILDKITE_BUILD_CREATOR-}" \
         --arg eventName "${BUILDKITE_SOURCE-}" \
         --arg orgSlug "${BUILDKITE_ORGANIZATION_SLUG-}" \
