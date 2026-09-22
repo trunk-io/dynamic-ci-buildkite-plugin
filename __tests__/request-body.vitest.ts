@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA } from "../src/schema/request";
+import { isPlanRequest, parsePlanRequest } from "./support/contract";
 import { PLUGIN_ROOT, vendoredJqPath } from "./support/jq";
 
 /**
@@ -85,14 +85,12 @@ const printBody = ({
 };
 
 describe("the plan request body", () => {
-  it("satisfies the engine's schema", () => {
-    expect(() =>
-      BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(printBody()),
-    ).not.toThrow();
+  it("satisfies the published schema", () => {
+    expect(() => parsePlanRequest(printBody())).not.toThrow();
   });
 
   it("maps each field from the agent's environment", () => {
-    const body = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(printBody());
+    const body = parsePlanRequest(printBody());
 
     expect(body).toMatchObject({
       repo: { host: "github.com", owner: "trunk-io", name: "trunk2" },
@@ -114,7 +112,7 @@ describe("the plan request body", () => {
   // attempt from it split one build's plans across several attempts of a run that
   // only ever had one.
   it("reports the same run attempt however often the upload step is retried", () => {
-    const body = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(
+    const body = parsePlanRequest(
       printBody({ env: { BUILDKITE_RETRY_COUNT: "2" } }),
     );
 
@@ -122,7 +120,7 @@ describe("the plan request body", () => {
   });
 
   it("sends a null prNumber when the build is not a pull request", () => {
-    const body = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(
+    const body = parsePlanRequest(
       printBody({ env: { BUILDKITE_PULL_REQUEST: "false" } }),
     );
 
@@ -130,7 +128,7 @@ describe("the plan request body", () => {
   });
 
   it("sends a null baseSha when there is no base branch to diff against", () => {
-    const body = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(printBody());
+    const body = parsePlanRequest(printBody());
 
     expect(body.baseSha).toBeNull();
   });
@@ -141,7 +139,7 @@ describe("the plan request body", () => {
   it("resolves baseSha to the merge base of the PR's target branch", () => {
     const { dir, mergeBase } = gitRepoWithBranch();
 
-    const body = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(
+    const body = parsePlanRequest(
       printBody({
         cwd: dir,
         env: { BUILDKITE_PULL_REQUEST_BASE_BRANCH: "main" },
@@ -161,7 +159,7 @@ describe("the plan request body", () => {
   });
 
   it("splits ignore-signals and drops the empties", () => {
-    const body = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(
+    const body = parsePlanRequest(
       printBody({
         env: {
           BUILDKITE_PLUGIN_DYNAMIC_CI_IGNORE_SIGNALS:
@@ -181,9 +179,7 @@ describe("the plan request body", () => {
       env: { BUILDKITE_PLUGIN_DYNAMIC_CI_IGNORE_SIGNALS: "not-a-signal" },
     });
 
-    expect(BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.safeParse(body).success).toBe(
-      false,
-    );
+    expect(isPlanRequest(body)).toBe(false);
   });
 });
 

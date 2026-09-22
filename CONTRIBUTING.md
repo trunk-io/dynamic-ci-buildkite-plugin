@@ -16,7 +16,8 @@ pnpm install
 
 ```sh
 pnpm test        # the suite, and the real gate on a change here
-pnpm typecheck   # tsc over the tests and the synced schema
+pnpm typecheck   # tsc over the tests and the generated contract types
+pnpm generate:schema  # regenerate src/schema/contract.d.ts from the synced JSON
 pnpm lint        # eslint over the same
 trunk check      # shellcheck, shfmt, prettier, markdownlint, yamllint
 ```
@@ -46,7 +47,7 @@ real thing out of process:
   script into a temp directory and puts it first on `PATH`, which is what makes
   the YAML branch testable without an agent.
 - **The plan server is real** — `__tests__/support/plan-server.ts` binds a
-  loopback HTTP server on port 0 and serves plans validated against the shipped
+  loopback HTTP server on port 0 and serves plans validated against the published
   response schema. No HTTP mocking library is involved.
 
 That design is the reason `pnpm test` means something: a green run says the
@@ -73,19 +74,22 @@ of a pinned tag; `.buildkite/steps/plugin-lint.sh` says why in full.
 
 ## The synced schema
 
-`src/schema/` is a projection of the wire contract the plugin speaks to the Trunk
-recommendation service. **Do not hand-edit it.** The contract changes upstream; a
-sync job then opens a pull request here and against
+`src/schema/dynamic-ci-contract.json` is the **published** OpenAPI contract for
+`POST /v2/dynamic-ci/generate-buildkite-plan`, projected out of Trunk's API
+document. **Do not hand-edit it.** The contract changes upstream; a sync job then
+opens a pull request here and against
 [`trunk-io/dynamic-ci`](https://github.com/trunk-io/dynamic-ci), the Dynamic CI
-GitHub Action, which vendors the same copy.
+GitHub Action, which vendors the same file.
 
-Nothing the plugin _runs_ imports those files — the request body is built in
-`lib/request-body.jq`. They exist so the tests can check that body against the
-real contract instead of a restatement of it.
+Nothing the plugin _runs_ reads it — the request body is built in
+`lib/request-body.jq`. It exists so the tests can check that body against the
+real contract instead of a restatement of it: `__tests__/support/contract.ts`
+compiles Ajv validators from the JSON, and `pnpm generate:schema` turns it into
+the committed `src/schema/contract.d.ts` the fixtures are typed against.
 
-`tsconfig.json`'s strictness mirrors the upstream definition's on purpose, so a
-synced file compiles identically on both sides. Relaxing a flag there desyncs the
-two copies.
+Validating against the published document rather than the engine's internal one
+is what makes the bounds real: `jobKeys` is capped, and the two Buildkite slugs
+have lengths, none of which the previous copy carried.
 
 ## The vendored jq
 

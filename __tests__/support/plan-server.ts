@@ -1,9 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import {
-  DYNAMIC_CI_RESPONSE_SCHEMA,
-  type DynamicCiResponse,
-} from "../../src/schema/response";
+import { type CiPlan, parsePlan } from "./contract";
 
 /** What the filter or hook actually sent, captured for assertions. */
 export interface CapturedRequest {
@@ -18,18 +15,18 @@ export interface CapturedRequest {
  * child would block the event loop this server answers on — which is a hang
  * rather than a failure, and costs a test run to diagnose.
  *
- * The plan is parsed against the engine's own response schema before it is
- * served, so these tests cannot pass against a plan shape the engine would never
+ * The plan is validated against the published response schema before it is
+ * served, so these tests cannot pass against a plan shape the API would never
  * return. That is the response-side half of what `--print-body` does for the
  * request: both directions of the wire contract fail here rather than in a
  * customer's build.
  */
 export const withPlanServer = async (
-  plan: DynamicCiResponse,
+  plan: CiPlan,
   captured: CapturedRequest,
   run: (address: string) => Promise<void>,
 ): Promise<void> => {
-  const body = JSON.stringify(DYNAMIC_CI_RESPONSE_SCHEMA.parse(plan));
+  const body = JSON.stringify(parsePlan(plan));
   const server: Server = createServer((req, res) => {
     const parts: Buffer[] = [];
     req.on("data", (chunk: Buffer) => parts.push(chunk));

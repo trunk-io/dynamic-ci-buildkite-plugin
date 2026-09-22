@@ -253,8 +253,8 @@ appended). It is the same variable the test-results uploader and the GitHub
 Action read.
 
 The plugin and the [Dynamic CI GitHub
-Action](https://github.com/trunk-io/dynamic-ci) speak one wire contract, synced
-into both from the same upstream definition. They release independently.
+Action](https://github.com/trunk-io/dynamic-ci) speak one wire contract — Trunk's
+published API schema, synced into both. They release independently.
 
 ## Versioning
 

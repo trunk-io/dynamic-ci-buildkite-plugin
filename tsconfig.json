@@ -7,11 +7,7 @@
     "lib": ["ESNext"],
     "types": ["node"],
 
-    /* Type checking. These deliberately mirror the strictness the wire contract is
-       held to upstream, so a synced file compiles identically on both sides —
-       notably `exactOptionalPropertyTypes: false`, `noPropertyAccessFromIndexSignature`
-       (hence `process.env["X"]`) and `isolatedDeclarations` (hence the explicit
-       annotations on the schema exports). Changing one desyncs the two copies. */
+    /* Type checking. */
     "strict": true,
     "exactOptionalPropertyTypes": false,
     "erasableSyntaxOnly": true,
@@ -26,6 +22,7 @@
     "isolatedModules": true,
     "isolatedDeclarations": true,
     "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
 
     /* Type-check only. `declaration` has to be on for `isolatedDeclarations` to be
        legal, but nothing is emitted. */
@@ -35,6 +32,11 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["__tests__/**/*.ts", "src/schema/**/*.ts", "vitest.config.ts"],
+  "include": [
+    "__tests__/**/*.ts",
+    "src/schema/**/*.ts",
+    "src/schema/**/*.d.ts",
+    "vitest.config.ts"
+  ],
   "exclude": ["node_modules", "coverage"]
 }
