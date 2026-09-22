@@ -22,9 +22,6 @@ const validator = <T>(name: string): ValidateFunction<T> => {
 const validateRequest = validator<BuildkitePlanRequest>("BuildkitePlanRequest");
 const validatePlan = validator<CiPlan>("CiPlan");
 
-export const isPlanRequest = (value: unknown): boolean =>
-  validateRequest(value);
-
 export const parsePlanRequest = (value: unknown): BuildkitePlanRequest => {
   if (!validateRequest(value)) {
     throw new Error(

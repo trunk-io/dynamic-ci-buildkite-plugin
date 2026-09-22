@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isPlanRequest, parsePlanRequest } from "./support/contract";
+import { parsePlanRequest } from "./support/contract";
 import { PLUGIN_ROOT, vendoredJqPath } from "./support/jq";
 
 /**
@@ -179,7 +179,7 @@ describe("the plan request body", () => {
       env: { BUILDKITE_PLUGIN_DYNAMIC_CI_IGNORE_SIGNALS: "not-a-signal" },
     });
 
-    expect(isPlanRequest(body)).toBe(false);
+    expect(() => parsePlanRequest(body)).toThrow();
   });
 });
 
