@@ -10,9 +10,9 @@
 #   request-plan.sh <job-keys-json>                POST and print the plan
 #   request-plan.sh --print-body <job-keys-json>   print the body, make no call
 #
-# `--print-body` exists for the tests: they parse that output with the vendored
-# copy of the engine's zod schema, so a missing, renamed or mistyped field is a
-# CI failure here rather than a 400 nobody sees until a customer's build.
+# `--print-body` exists for the tests: they validate that output against the
+# vendored copy of the published schema, so a missing, renamed or mistyped field
+# is a CI failure here rather than a 400 nobody sees until a customer's build.
 
 set -euo pipefail
 
