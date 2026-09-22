@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA } from "../src/schema/request";
+import { parsePlanRequest } from "./support/contract";
 import { PLUGIN_ROOT, vendoredJqPath } from "./support/jq";
 import {
   AGENT_ENV,
@@ -89,9 +89,7 @@ describe("step mode", () => {
       expect(result.stderr).toContain("reports success");
     });
 
-    const request = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(
-      captured.received,
-    );
+    const request = parsePlanRequest(captured.received);
     expect(request.jobKeys).toEqual(["unit"]);
   });
 

@@ -2,8 +2,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA } from "../src/schema/request";
-import type { DynamicCiResponse } from "../src/schema/response";
+import { type CiPlan, parsePlanRequest } from "./support/contract";
 import { fakeAgentPath } from "./support/agent";
 import { PLUGIN_ROOT, vendoredJqPath } from "./support/jq";
 import {
@@ -82,9 +81,7 @@ describe("filter mode", () => {
     });
 
     // The request the filter actually made, against the engine's own schema.
-    expect(() =>
-      BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(captured.received),
-    ).not.toThrow();
+    expect(() => parsePlanRequest(captured.received)).not.toThrow();
   });
 
   it("does not ask for a verdict on a trigger step", async () => {
@@ -96,9 +93,7 @@ describe("filter mode", () => {
       });
     });
 
-    const request = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(
-      captured.received,
-    );
+    const request = parsePlanRequest(captured.received);
     expect(request.jobKeys).toEqual(["unit", "e2e"]);
   });
 
@@ -173,7 +168,7 @@ describe("the summary of what was marked", () => {
 
   const summaryFor = async (
     pipeline: unknown,
-    plan: DynamicCiResponse,
+    plan: CiPlan,
   ): Promise<string> => {
     const captured: CapturedRequest = {};
     let stderr = "";
@@ -346,9 +341,7 @@ describe("the only-keys option", () => {
       });
     });
 
-    const request = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(
-      captured.received,
-    );
+    const request = parsePlanRequest(captured.received);
     expect(request.jobKeys).toEqual(["unit"]);
   });
 
@@ -394,9 +387,7 @@ describe("the only-keys option", () => {
       expect(JSON.parse(stdout)).toEqual(PIPELINE);
     });
 
-    const request = BUILDKITE_DYNAMIC_CI_REQUEST_SCHEMA.parse(
-      captured.received,
-    );
+    const request = parsePlanRequest(captured.received);
     expect(request.jobKeys).toEqual(["e2e"]);
   });
 
