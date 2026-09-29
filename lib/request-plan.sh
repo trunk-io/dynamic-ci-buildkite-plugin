@@ -86,16 +86,16 @@ dci_base_sha() {
 # Fails rather than writing an empty list, which would read as "nothing changed";
 # the omitted field sends the server to GitHub instead.
 dci_changed_files() {
-    local jq_bin="$1" base="$2" out="$3" dir
+    local jq_bin="$1" base="$2" range="$3" out="$4" dir
     [[ -n ${base} ]] || return 1
 
     dir="$(mktemp -d)"
     # shellcheck disable=SC2064  # expand now: $dir must not change later
     trap "rm -rf '${dir}'" RETURN
 
-    git diff -z -M --no-ext-diff --no-textconv --name-status "${base}...HEAD" \
+    git diff -z -M --no-ext-diff --no-textconv --name-status "${range}" \
         >"${dir}/status" 2>/dev/null || return 1
-    git diff -z -M --no-ext-diff --no-textconv --numstat "${base}...HEAD" \
+    git diff -z -M --no-ext-diff --no-textconv --numstat "${range}" \
         >"${dir}/numstat" 2>/dev/null || return 1
     "${jq_bin}" -n \
         --rawfile status "${dir}/status" \
@@ -105,15 +105,22 @@ dci_changed_files() {
         -f "${LIB_DIR}/changed-files.jq" >"${out}" 2>/dev/null || return 1
 }
 
-dci_commit_sha() {
-    local name="${BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA_ENV-}"
-    if [[ -n ${BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA-} ]]; then
-        echo "${BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA}"
+# The option's value, else the variable its `-env` twin names, read when the job
+# runs: `$VAR` in pipeline YAML is filled in at upload, before a checkout sets it.
+dci_option_or_env() {
+    local value="$1" name="$2"
+    if [[ -n ${value} ]]; then
+        echo "${value}"
     elif [[ ${name} =~ ^[A-Za-z_][A-Za-z0-9_]*$ && -n ${!name-} ]]; then
         echo "${!name}"
-    else
-        echo "${BUILDKITE_COMMIT-}"
     fi
+}
+
+dci_commit_sha() {
+    local sha
+    sha="$(dci_option_or_env "${BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA-}" \
+        "${BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA_ENV-}")"
+    echo "${sha:-${BUILDKITE_COMMIT-}}"
 }
 
 # `BUILDKITE_PULL_REQUEST` is the literal string "false" off a pull request, not
@@ -229,8 +236,18 @@ main() {
     work="$(mktemp -d)"
     # shellcheck disable=SC2064  # expand now: $work must not change later
     trap "rm -rf '${work}'" EXIT
-    base="$(dci_base_sha)"
-    if ! dci_changed_files "${jq_bin}" "${base}" "${work}/changed-files.json"; then
+    # A base the caller names is compared to HEAD directly; it need not be an
+    # ancestor, so a merge base could pick the wrong one of several.
+    local range
+    base="$(dci_option_or_env "${BUILDKITE_PLUGIN_DYNAMIC_CI_BASE_SHA-}" \
+        "${BUILDKITE_PLUGIN_DYNAMIC_CI_BASE_SHA_ENV-}")"
+    if [[ -n ${base} ]]; then
+        range="${base}..HEAD"
+    else
+        base="$(dci_base_sha)"
+        range="${base}...HEAD"
+    fi
+    if ! dci_changed_files "${jq_bin}" "${base}" "${range}" "${work}/changed-files.json"; then
         : >"${work}/changed-files.json"
     fi
 
