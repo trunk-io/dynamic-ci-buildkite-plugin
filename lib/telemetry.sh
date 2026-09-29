@@ -59,8 +59,11 @@ dci_send_telemetry() {
         --argjson job_count "${job_count}" \
         -f "${DCI_TELEMETRY_DIR}/telemetry.jq" 2>/dev/null)" || return 0
 
-    body="$(mktemp)"
-    printf '%b' "${escaped}" >"${body}"
+    body="$(mktemp 2>/dev/null)" || return 0
+    printf '%b' "${escaped}" 2>/dev/null >"${body}" || {
+        rm -f "${body}"
+        return 0
+    }
     curl -sS -o /dev/null --max-time 1 \
         -X POST "$(dci_telemetry_url)" \
         -A "$(dci_user_agent "${jq_bin}")" \

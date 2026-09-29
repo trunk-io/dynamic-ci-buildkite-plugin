@@ -217,3 +217,26 @@ describe("a token-env that is not a variable name", () => {
     expect(existsSync(marker)).toBe(true);
   });
 });
+
+describe("an unusable temp directory", () => {
+  it("still runs the step in step mode", async () => {
+    const marker = join(mkdtempSync(join(tmpdir(), "dci-tmp-")), "ran");
+    await withPlanServer(PLAN, {}, async (address) => {
+      await execFileAsync(join(PLUGIN_ROOT, "hooks/command"), {
+        encoding: "utf8",
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          TRUNK_DCI_JQ: vendoredJqPath(),
+          ...AGENT_ENV,
+          TMPDIR: "/nonexistent",
+          TRUNK_PUBLIC_API_ADDRESS: address,
+          BUILDKITE_PLUGIN_DYNAMIC_CI_MODE: "step",
+          BUILDKITE_STEP_KEY: "unit",
+          BUILDKITE_COMMAND: `touch ${marker}`,
+        },
+      });
+    });
+
+    expect(existsSync(marker)).toBe(true);
+  });
+});

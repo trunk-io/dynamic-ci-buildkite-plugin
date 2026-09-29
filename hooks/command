@@ -112,7 +112,8 @@ step_mode() {
 		hand_back
 	fi
 
-	meta="$(mktemp)"
+	# Under `set -e` an unguarded failure here would stop the step from running.
+	meta="$(mktemp 2>/dev/null)" || meta=""
 	started_ms="$(dci_now_ms)"
 	# shellcheck disable=SC2016 # `$key` is a jq variable, bound by --arg, not a shell one
 	if ! plan="$(TRUNK_DCI_TOKEN_ENV="${TOKEN_ENV}" TRUNK_DCI_JQ="${jq_bin}" \
