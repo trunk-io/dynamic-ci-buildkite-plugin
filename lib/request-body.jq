@@ -36,3 +36,5 @@ def signals:
 + optional("triggeringActor"; $triggeringActor)
 + optional("eventName"; $eventName)
 + (if $ignoreSignals == "" then {} else { ignoreSignals: signals } end)
+# Slurped: empty when the diff could not be taken, which omits the field.
++ (if ($changedFiles | length) == 0 then {} else { changedFiles: $changedFiles[0] } end)

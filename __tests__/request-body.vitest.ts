@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -55,6 +55,53 @@ const gitRepoWithBranch = (): { dir: string; mergeBase: string } => {
   const mergeBase = git("rev-parse", "HEAD").trim();
   git("checkout", "--quiet", "-b", "feature");
   git("commit", "--quiet", "--allow-empty", "-m", "ahead");
+
+  return { dir, mergeBase };
+};
+
+/**
+ * `main` with `keep.txt`, `old.txt` and `gone.txt`, and a feature branch that
+ * edits, renames, deletes and adds — plus `extra` more new files, for the cap.
+ */
+const gitRepoWithChanges = (extra = 0): { dir: string; mergeBase: string } => {
+  const dir = mkdtempSync(join(tmpdir(), "dci-diff-"));
+  const git = (...args: readonly string[]): string =>
+    execFileSync("git", [...args], {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        HOME: dir,
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@example.com",
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@example.com",
+      },
+    });
+  const write = (path: string, content: string): void => {
+    writeFileSync(join(dir, path), content);
+  };
+
+  git("init", "--quiet", "--initial-branch=main");
+  write("keep.txt", "a\nb\nc\n");
+  write("old.txt", `${Array.from({ length: 20 }, (_u, i) => i).join("\n")}\n`);
+  write("gone.txt", "x\ny\n");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "base");
+  const mergeBase = git("rev-parse", "HEAD").trim();
+
+  git("checkout", "--quiet", "-b", "feature");
+  write("keep.txt", "a\nB\nc\nd\n");
+  git("mv", "old.txt", "new.txt");
+  write("new.txt", `${Array.from({ length: 21 }, (_u, i) => i).join("\n")}\n`);
+  git("rm", "--quiet", "gone.txt");
+  write("added with space.txt", "1\n2\n");
+  mkdirSync(join(dir, "many"));
+  for (let i = 0; i < extra; i += 1) {
+    write(join("many", `f${String(i).padStart(4, "0")}.txt`), "1\n");
+  }
+  git("add", ".");
+  git("commit", "--quiet", "-m", "change");
 
   return { dir, mergeBase };
 };
@@ -230,5 +277,142 @@ describe("the remote parse", () => {
       owner: "acme",
       name: "widgets",
     });
+  });
+});
+
+describe("the changed files", () => {
+  const withChanges = (extra = 0, env: Record<string, string> = {}) => {
+    const { dir, mergeBase } = gitRepoWithChanges(extra);
+    const body = parsePlanRequest(
+      printBody({
+        cwd: dir,
+        env: { BUILDKITE_PULL_REQUEST_BASE_BRANCH: "main", ...env },
+      }),
+    );
+    return { body, mergeBase };
+  };
+
+  it("lists every change against the merge base, renames included", () => {
+    const { body, mergeBase } = withChanges();
+
+    expect(body.changedFiles).toEqual({
+      base: mergeBase,
+      totalFiles: 4,
+      totalAdditions: 5,
+      totalDeletions: 3,
+      files: [
+        {
+          path: "added with space.txt",
+          status: "added",
+          additions: 2,
+          deletions: 0,
+        },
+        { path: "gone.txt", status: "removed", additions: 0, deletions: 2 },
+        { path: "keep.txt", status: "modified", additions: 2, deletions: 1 },
+        {
+          path: "new.txt",
+          previousPath: "old.txt",
+          status: "renamed",
+          additions: 1,
+          deletions: 0,
+        },
+      ],
+    });
+  });
+
+  it("caps the list at 200 and keeps the totals over every file", () => {
+    const { body } = withChanges(250);
+
+    expect(body.changedFiles).toMatchObject({
+      totalFiles: 254,
+      totalAdditions: 255,
+      totalDeletions: 3,
+    });
+    expect(body.changedFiles?.files).toHaveLength(200);
+  });
+
+  // An empty list would read as "nothing changed". Leaving the field out sends
+  // the server to GitHub instead.
+  it("is omitted when there is no base to diff against", () => {
+    expect(printBody()).not.toHaveProperty("changedFiles");
+  });
+
+  it("appears in the debug log as a count, not a list", () => {
+    const { dir } = gitRepoWithChanges();
+    const { stderr } = spawnSync(
+      join(PLUGIN_ROOT, "lib/request-plan.sh"),
+      ["--print-body", "[]"],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          TRUNK_DCI_JQ: vendoredJqPath(),
+          ...AGENT_ENV,
+          BUILDKITE_PULL_REQUEST_BASE_BRANCH: "main",
+          BUILDKITE_PLUGIN_DYNAMIC_CI_DEBUG: "true",
+        },
+      },
+    );
+
+    expect(stderr).toContain('"files": "4 files"');
+    expect(stderr).not.toContain("keep.txt");
+  });
+
+  it("is omitted when git cannot find the base branch", () => {
+    const { dir } = gitRepoWithChanges();
+
+    expect(
+      printBody({
+        cwd: dir,
+        env: { BUILDKITE_PULL_REQUEST_BASE_BRANCH: "no-such-branch" },
+      }),
+    ).not.toHaveProperty("changedFiles");
+  });
+});
+
+describe("the reported commit", () => {
+  const commitFor = (env: Record<string, string>): unknown =>
+    parsePlanRequest(printBody({ env })).commitSha;
+
+  it("is BUILDKITE_COMMIT by default", () => {
+    expect(commitFor({})).toBe(AGENT_ENV.BUILDKITE_COMMIT);
+  });
+
+  it("is commit-sha when set", () => {
+    expect(
+      commitFor({
+        BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA: "head",
+        BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA_ENV: "PR_HEAD",
+        PR_HEAD: "from-env",
+      }),
+    ).toBe("head");
+  });
+
+  it("is read from the variable commit-sha-env names", () => {
+    expect(
+      commitFor({
+        BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA_ENV: "PR_HEAD",
+        PR_HEAD: "from-env",
+      }),
+    ).toBe("from-env");
+  });
+
+  it.each([
+    ["an empty variable", { PR_HEAD: "" }],
+    ["an unset variable", {}],
+  ])("falls back to BUILDKITE_COMMIT for %s", (_name, env) => {
+    expect(
+      commitFor({
+        BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA_ENV: "PR_HEAD",
+        ...env,
+      }),
+    ).toBe(AGENT_ENV.BUILDKITE_COMMIT);
+  });
+
+  it("falls back to BUILDKITE_COMMIT when commit-sha-env is not a variable name", () => {
+    expect(
+      commitFor({ BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA_ENV: "$(echo x)" }),
+    ).toBe(AGENT_ENV.BUILDKITE_COMMIT);
   });
 });
