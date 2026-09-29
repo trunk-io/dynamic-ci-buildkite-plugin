@@ -23,6 +23,9 @@ source "${LIB_DIR}/jq.sh"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=debug.sh
 source "${LIB_DIR}/debug.sh"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=telemetry.sh
+source "${LIB_DIR}/telemetry.sh"
 
 DEFAULT_API_ADDRESS="https://api.trunk.io"
 PLAN_PATH="/v2/dynamic-ci/generate-buildkite-plan"
@@ -167,8 +170,19 @@ dci_build_body() {
         -f "${LIB_DIR}/request-body.jq"
 }
 
+# The failure reason and repo for the caller's telemetry, in the Action's vocabulary.
+DCI_FAIL_REASON="internal"
+DCI_REPO_JSON="{}"
+dci_note_outcome() {
+    local jq_bin="$1" reason="$2"
+    [[ -n ${TRUNK_DCI_META-} ]] || return 0
+    # shellcheck disable=SC2016 # jq variables, bound by --arg, not shell ones
+    "${jq_bin}" -cn --argjson repo "${DCI_REPO_JSON}" --arg reason "${reason}" \
+        '{repo: $repo, reason: $reason}' >"${TRUNK_DCI_META}" 2>/dev/null || true
+}
+
 dci_post() {
-    local body_file="$1" token="$2" url="$3" response status
+    local body_file="$1" token="$2" url="$3" jq_bin="$4" response status code
 
     response="$(mktemp)"
     # shellcheck disable=SC2064  # expand now: $response must not change later
@@ -177,14 +191,26 @@ dci_post() {
     status="$(curl -sS -o "${response}" -w '%{http_code}' \
         --max-time "${TIMEOUT_SECONDS}" --retry "${RETRIES}" --retry-delay 1 \
         -X POST "${url}" \
+        -A "$(dci_user_agent "${jq_bin}")" \
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
         --data-binary "@${body_file}")" || {
+        code=$?
+        if [[ ${code} == 28 ]]; then
+            DCI_FAIL_REASON="timeout"
+        else
+            DCI_FAIL_REASON="transport"
+        fi
         log "the plan request could not be made"
         return 1
     }
 
     if [[ ${status} != 2?? ]]; then
+        case "${status}" in
+        429) DCI_FAIL_REASON="http_rate_limited" ;;
+        4??) DCI_FAIL_REASON="http_client_error" ;;
+        *) DCI_FAIL_REASON="http_server_error" ;;
+        esac
         log "the plan request returned HTTP ${status}"
         # The envelope carries a coded message worth surfacing; cap it so a stray
         # HTML error page cannot flood the build log.
@@ -231,6 +257,9 @@ main() {
     fi
     host="$(head -n1 <<<"${parsed}")"
     repo_path="$(tail -n1 <<<"${parsed}")"
+    # shellcheck disable=SC2016 # jq variables, bound by --arg, not shell ones
+    DCI_REPO_JSON="$("${jq_bin}" -cn --arg host "${host}" --arg path "${repo_path}" \
+        '{host: $host, owner: ($path | split("/")[0]), name: ($path | split("/")[1:] | join("/"))}')"
 
     local work base
     work="$(mktemp -d)"
@@ -275,7 +304,11 @@ main() {
     fi
 
     local address="${TRUNK_PUBLIC_API_ADDRESS:-${DEFAULT_API_ADDRESS}}"
-    dci_post "${work}/body.json" "${token}" "${address%/}${PLAN_PATH}"
+    if ! dci_post "${work}/body.json" "${token}" "${address%/}${PLAN_PATH}" "${jq_bin}"; then
+        dci_note_outcome "${jq_bin}" "${DCI_FAIL_REASON}"
+        return 1
+    fi
+    dci_note_outcome "${jq_bin}" ""
 }
 
 main "$@"

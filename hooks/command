@@ -25,6 +25,9 @@ source "${PLUGIN_DIR}/lib/notice.sh"
 # shellcheck source-path=SCRIPTDIR/..
 # shellcheck source=lib/debug.sh
 source "${PLUGIN_DIR}/lib/debug.sh"
+# shellcheck source-path=SCRIPTDIR/..
+# shellcheck source=lib/telemetry.sh
+source "${PLUGIN_DIR}/lib/telemetry.sh"
 
 MODE="${BUILDKITE_PLUGIN_DYNAMIC_CI_MODE:-filter}"
 TOKEN_ENV="${BUILDKITE_PLUGIN_DYNAMIC_CI_TOKEN_ENV:-TRUNK_TOKEN}"
@@ -70,7 +73,7 @@ warn_if_filter_unused() {
 # Filter mode does not have this problem, because the step is marked before
 # dispatch and so reports as genuinely skipped.
 step_mode() {
-	local key="${BUILDKITE_STEP_KEY-}" jq_bin plan skips reason
+	local key="${BUILDKITE_STEP_KEY-}" jq_bin plan skips reason meta started_ms outcome
 
 	# There is no useful degraded behaviour here: the key IS the
 	# request. Running the step while the customer believes Dynamic CI is
@@ -106,10 +109,15 @@ step_mode() {
 		hand_back
 	fi
 
+	meta="$(mktemp)"
+	started_ms="$(dci_now_ms)"
 	# shellcheck disable=SC2016 # `$key` is a jq variable, bound by --arg, not a shell one
 	if ! plan="$(TRUNK_DCI_TOKEN_ENV="${TOKEN_ENV}" TRUNK_DCI_JQ="${jq_bin}" \
-		"${PLUGIN_DIR}/lib/request-plan.sh" \
+		TRUNK_DCI_META="${meta}" "${PLUGIN_DIR}/lib/request-plan.sh" \
 		"$("${jq_bin}" -c -n --arg key "${key}" '[$key]')")"; then
+		dci_send_telemetry "${jq_bin}" "${!TOKEN_ENV-}" 2 \
+			"$("${jq_bin}" -r '.reason // "internal"' "${meta}" 2>/dev/null || echo internal)" \
+			0 "${started_ms}" "${meta}"
 		log "--- :trunk: Dynamic CI is unavailable — running this step"
 		hand_back
 	fi
@@ -121,9 +129,16 @@ step_mode() {
 	dci_debug_block "${jq_bin}" "plan" "${plan}"
 
 	if ! skips="$("${jq_bin}" -c -f "${PLUGIN_DIR}/lib/plan-to-skips.jq" <<<"${plan}")"; then
+		dci_send_telemetry "${jq_bin}" "${!TOKEN_ENV-}" 2 invalid_response 0 "${started_ms}" "${meta}"
 		log "--- :trunk: Dynamic CI returned a plan this version cannot read — running this step"
 		hand_back
 	fi
+
+	outcome="$("${jq_bin}" -r -f "${PLUGIN_DIR}/lib/plan-outcome.jq" <<<"${plan}" 2>/dev/null)" ||
+		outcome="2 internal"
+	dci_send_telemetry "${jq_bin}" "${!TOKEN_ENV-}" "${outcome%% *}" "${outcome#* }" \
+		"$("${jq_bin}" '.jobs | length' <<<"${plan}" 2>/dev/null || echo 0)" "${started_ms}" "${meta}"
+	rm -f "${meta}"
 
 	# Absent from the skip set means run, which is also what an empty plan and an
 	# unrecognised key mean. Every one of them runs the step.
