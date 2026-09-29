@@ -72,6 +72,8 @@ speaks up only when that command really does pass the flag.
 | `exclude-keys`   | unset         | Comma-separated step keys to never skip. Trunk still runs them; it just never decides about them. Applied after `only-keys`, so a key in both is excluded.                                                                     |
 | `debug`          | `false`       | Print the requested step keys, the request body and the plan to the build log, in collapsed groups. All of it goes to stderr, so it is safe in filter mode.                                                                    |
 | `ignore-signals` | unset         | Comma-separated signal identifiers to exclude from the recommendation.                                                                                                                                                         |
+| `commit-sha`     | unset         | The commit to report instead of `BUILDKITE_COMMIT`, such as the pull request's head when your checkout builds a merge commit.                                                                                                  |
+| `commit-sha-env` | unset         | Name of the environment variable holding that commit, read when the job runs. Use it when the pipeline is not generated per build. `commit-sha` wins when both are set.                                                        |
 
 **The token must reach the step without passing through the pipeline
 definition.** Two things are interpolated into the uploaded pipeline at upload
@@ -178,10 +180,12 @@ steps those were.
 The plugin's only effect is to add a `skip:` attribute to steps Trunk
 recommended skipping. Specifically:
 
-- It **never reads or writes a file in your repository.** The pipeline is
-  rendered by `buildkite-agent pipeline upload --dry-run --format json`, so your
-  YAML is parsed by Buildkite's own agent and the change happens to the rendered
-  copy in flight.
+- It **never writes a file in your repository**, and reads none of their
+  contents. It runs `git diff` for the changed files' names, statuses and line
+  counts, which it sends to Trunk with the request. The pipeline is rendered by
+  `buildkite-agent pipeline upload --dry-run --format json`, so your YAML is
+  parsed by Buildkite's own agent and the change happens to the rendered copy in
+  flight.
 - It **never changes a command**, adds a step, removes a step, or reorders
   anything.
 - It **never overrides a `skip:` you wrote yourself**, including `skip: false`.

@@ -29,6 +29,7 @@ PLAN_PATH="/v2/dynamic-ci/generate-buildkite-plan"
 # Mirrors the GitHub Action's budget: 30s per attempt, three attempts total.
 TIMEOUT_SECONDS=30
 RETRIES=2
+MAX_CHANGED_FILES=200
 
 log() { echo "$1" >&2; }
 
@@ -82,6 +83,39 @@ dci_base_sha() {
         true
 }
 
+# Fails rather than writing an empty list, which would read as "nothing changed";
+# the omitted field sends the server to GitHub instead.
+dci_changed_files() {
+    local jq_bin="$1" base="$2" out="$3" dir
+    [[ -n ${base} ]] || return 1
+
+    dir="$(mktemp -d)"
+    # shellcheck disable=SC2064  # expand now: $dir must not change later
+    trap "rm -rf '${dir}'" RETURN
+
+    git diff -z -M --no-ext-diff --no-textconv --name-status "${base}...HEAD" \
+        >"${dir}/status" 2>/dev/null || return 1
+    git diff -z -M --no-ext-diff --no-textconv --numstat "${base}...HEAD" \
+        >"${dir}/numstat" 2>/dev/null || return 1
+    "${jq_bin}" -n \
+        --rawfile status "${dir}/status" \
+        --rawfile numstat "${dir}/numstat" \
+        --arg base "${base}" \
+        --argjson max "${MAX_CHANGED_FILES}" \
+        -f "${LIB_DIR}/changed-files.jq" >"${out}" 2>/dev/null || return 1
+}
+
+dci_commit_sha() {
+    local name="${BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA_ENV-}"
+    if [[ -n ${BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA-} ]]; then
+        echo "${BUILDKITE_PLUGIN_DYNAMIC_CI_COMMIT_SHA}"
+    elif [[ ${name} =~ ^[A-Za-z_][A-Za-z0-9_]*$ && -n ${!name-} ]]; then
+        echo "${!name}"
+    else
+        echo "${BUILDKITE_COMMIT-}"
+    fi
+}
+
 # `BUILDKITE_PULL_REQUEST` is the literal string "false" off a pull request, not
 # an empty value — so this has to be compared, never tested for truthiness.
 dci_pr_number() {
@@ -93,7 +127,8 @@ dci_pr_number() {
 }
 
 dci_build_body() {
-    local jq_bin="$1" job_keys="$2" host="$3" repo_path="$4"
+    local jq_bin="$1" job_keys="$2" host="$3" repo_path="$4" base="$5"
+    local changed_files="$6"
     local owner="${repo_path%%/*}" name="${repo_path#*/}"
 
     # Built by jq rather than printf: every value here is attacker-adjacent (a
@@ -109,8 +144,8 @@ dci_build_body() {
         --arg host "${host}" \
         --arg owner "${owner}" \
         --arg name "${name}" \
-        --arg commitSha "${BUILDKITE_COMMIT-}" \
-        --arg baseSha "$(dci_base_sha)" \
+        --arg commitSha "$(dci_commit_sha)" \
+        --arg baseSha "${base}" \
         --arg branch "${BUILDKITE_BRANCH-}" \
         --arg prNumber "$(dci_pr_number)" \
         --arg runId "${BUILDKITE_BUILD_NUMBER-}" \
@@ -121,11 +156,12 @@ dci_build_body() {
         --arg pipelineSlug "${BUILDKITE_PIPELINE_SLUG-}" \
         --arg ignoreSignals "${BUILDKITE_PLUGIN_DYNAMIC_CI_IGNORE_SIGNALS-}" \
         --argjson jobKeys "${job_keys}" \
+        --slurpfile changedFiles "${changed_files}" \
         -f "${LIB_DIR}/request-body.jq"
 }
 
 dci_post() {
-    local body="$1" token="$2" url="$3" response status
+    local body_file="$1" token="$2" url="$3" response status
 
     response="$(mktemp)"
     # shellcheck disable=SC2064  # expand now: $response must not change later
@@ -136,7 +172,7 @@ dci_post() {
         -X POST "${url}" \
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
-        --data-binary "${body}")" || {
+        --data-binary "@${body_file}")" || {
         log "the plan request could not be made"
         return 1
     }
@@ -189,16 +225,28 @@ main() {
     host="$(head -n1 <<<"${parsed}")"
     repo_path="$(tail -n1 <<<"${parsed}")"
 
-    local body
-    body="$(dci_build_body "${jq_bin}" "${job_keys}" "${host}" "${repo_path}")"
+    local work base
+    work="$(mktemp -d)"
+    # shellcheck disable=SC2064  # expand now: $work must not change later
+    trap "rm -rf '${work}'" EXIT
+    base="$(dci_base_sha)"
+    if ! dci_changed_files "${jq_bin}" "${base}" "${work}/changed-files.json"; then
+        : >"${work}/changed-files.json"
+    fi
+
+    dci_build_body "${jq_bin}" "${job_keys}" "${host}" "${repo_path}" \
+        "${base}" "${work}/changed-files.json" >"${work}/body.json"
 
     # The body is what diagnoses a resolution that looked fine and was not: the
     # wrong pipeline slug, a null baseSha, a repo parsed differently from how
     # ingestion parsed it. It carries no credential — the token rides a header.
-    dci_debug_block "${jq_bin}" "request body" "${body}"
+    if dci_debug_enabled; then
+        dci_debug_block "${jq_bin}" "request body" \
+            "$("${jq_bin}" 'if .changedFiles then .changedFiles.files |= "\(length) files" else . end' "${work}/body.json")"
+    fi
 
     if [[ ${print_body} == true ]]; then
-        echo "${body}"
+        cat "${work}/body.json"
         return 0
     fi
 
@@ -210,7 +258,7 @@ main() {
     fi
 
     local address="${TRUNK_PUBLIC_API_ADDRESS:-${DEFAULT_API_ADDRESS}}"
-    dci_post "${body}" "${token}" "${address%/}${PLAN_PATH}"
+    dci_post "${work}/body.json" "${token}" "${address%/}${PLAN_PATH}"
 }
 
 main "$@"

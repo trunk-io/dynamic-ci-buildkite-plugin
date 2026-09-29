@@ -49,6 +49,17 @@ configuration:
         in filter mode. Off by default.
       type: boolean
       default: false
+    commit-sha:
+      description:
+        The commit to report instead of BUILDKITE_COMMIT, such as the pull
+        request's head when your checkout builds a merge commit.
+      type: string
+    commit-sha-env:
+      description:
+        Name of the environment variable holding that commit, read when the job
+        runs. Use it when the pipeline is not generated per build. commit-sha
+        wins when both are set.
+      type: string
     ignore-signals:
       description: Comma-separated signal identifiers to exclude from the recommendation.
       type: string
