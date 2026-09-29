@@ -96,6 +96,14 @@ export interface components {
              */
             eventName?: string;
             /**
+             * @description `BUILDKITE_PULL_REQUEST_LABELS`, split on commas. While the repository is in Learning mode, a pull request carrying a label on the repository's managed allow list (matched case-insensitively) is gated as if Dynamic CI were enabled.
+             * @example [
+             *       "bug",
+             *       "ready-for-ci"
+             *     ]
+             */
+            prLabels?: string[];
+            /**
              * @description The step `key:` values to decide — what Trunk ingests from `buildkite.step.key`. **Empty means every keyed step in the pipeline** — the usual call.
              * @default []
              * @example [
@@ -217,6 +225,14 @@ export interface components {
              * @example pull_request
              */
             eventName?: string;
+            /**
+             * @description The pull request's label names, from `github.event.pull_request.labels`. While the repository is in Learning mode, a pull request carrying a label on the repository's managed allow list (matched case-insensitively) is gated as if Dynamic CI were enabled.
+             * @example [
+             *       "bug",
+             *       "ready-for-ci"
+             *     ]
+             */
+            prLabels?: string[];
             /**
              * @description The `jobs:` keys to decide. **Empty means every keyed job in the workflow** — the usual call.
              * @default []
