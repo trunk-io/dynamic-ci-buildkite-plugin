@@ -28,6 +28,9 @@ source "${PLUGIN_DIR}/lib/debug.sh"
 # shellcheck source-path=SCRIPTDIR/..
 # shellcheck source=lib/telemetry.sh
 source "${PLUGIN_DIR}/lib/telemetry.sh"
+# shellcheck source-path=SCRIPTDIR/..
+# shellcheck source=lib/env.sh
+source "${PLUGIN_DIR}/lib/env.sh"
 
 MODE="${BUILDKITE_PLUGIN_DYNAMIC_CI_MODE:-filter}"
 TOKEN_ENV="${BUILDKITE_PLUGIN_DYNAMIC_CI_TOKEN_ENV:-TRUNK_TOKEN}"
@@ -115,7 +118,7 @@ step_mode() {
 	if ! plan="$(TRUNK_DCI_TOKEN_ENV="${TOKEN_ENV}" TRUNK_DCI_JQ="${jq_bin}" \
 		TRUNK_DCI_META="${meta}" "${PLUGIN_DIR}/lib/request-plan.sh" \
 		"$("${jq_bin}" -c -n --arg key "${key}" '[$key]')")"; then
-		dci_send_telemetry "${jq_bin}" "${!TOKEN_ENV-}" 2 \
+		dci_send_telemetry "${jq_bin}" "$(dci_env "${TOKEN_ENV}")" 2 \
 			"$("${jq_bin}" -r '.reason // "internal"' "${meta}" 2>/dev/null || echo internal)" \
 			0 "${started_ms}" "${meta}"
 		log "--- :trunk: Dynamic CI is unavailable — running this step"
@@ -129,14 +132,14 @@ step_mode() {
 	dci_debug_block "${jq_bin}" "plan" "${plan}"
 
 	if ! skips="$("${jq_bin}" -c -f "${PLUGIN_DIR}/lib/plan-to-skips.jq" <<<"${plan}")"; then
-		dci_send_telemetry "${jq_bin}" "${!TOKEN_ENV-}" 2 invalid_response 0 "${started_ms}" "${meta}"
+		dci_send_telemetry "${jq_bin}" "$(dci_env "${TOKEN_ENV}")" 2 invalid_response 0 "${started_ms}" "${meta}"
 		log "--- :trunk: Dynamic CI returned a plan this version cannot read — running this step"
 		hand_back
 	fi
 
 	outcome="$("${jq_bin}" -r -f "${PLUGIN_DIR}/lib/plan-outcome.jq" <<<"${plan}" 2>/dev/null)" ||
 		outcome="2 internal"
-	dci_send_telemetry "${jq_bin}" "${!TOKEN_ENV-}" "${outcome%% *}" "${outcome#* }" \
+	dci_send_telemetry "${jq_bin}" "$(dci_env "${TOKEN_ENV}")" "${outcome%% *}" "${outcome#* }" \
 		"$("${jq_bin}" '.jobs | length' <<<"${plan}" 2>/dev/null || echo 0)" "${started_ms}" "${meta}"
 	rm -f "${meta}"
 

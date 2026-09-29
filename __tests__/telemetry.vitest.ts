@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
@@ -148,6 +150,12 @@ describe("plan telemetry", () => {
     expect(captured.telemetry).toBeUndefined();
   });
 
+  it("still reports when the customer's job exports LIB_DIR", async () => {
+    const { captured } = await reportsFor(PLAN, { LIB_DIR: "/opt/app/lib" });
+
+    expect(captured.telemetry).toHaveLength(1);
+  });
+
   it("reports from step mode too", async () => {
     const captured: CapturedRequest = {};
     await withPlanServer(PLAN, captured, async (address) => {
@@ -173,5 +181,39 @@ describe("plan telemetry", () => {
       status: 1,
       jobCount: 2,
     });
+  });
+});
+
+// `${!name}` on an invalid name abandons the enclosing command: in filter mode
+// that skipped the fail-open and emitted an empty pipeline.
+describe("a token-env that is not a variable name", () => {
+  const BAD_TOKEN_ENV = { BUILDKITE_PLUGIN_DYNAMIC_CI_TOKEN_ENV: "MY-TOKEN" };
+
+  it("passes the pipeline through unchanged in filter mode", async () => {
+    const { stdout, captured } = await reportsFor(PLAN, BAD_TOKEN_ENV);
+
+    expect(stdout).toBe(JSON.stringify(PIPELINE));
+    expect(captured.telemetry).toBeUndefined();
+  });
+
+  it("still runs the step in step mode", async () => {
+    const marker = join(mkdtempSync(join(tmpdir(), "dci-token-")), "ran");
+    await withPlanServer(PLAN, {}, async (address) => {
+      await execFileAsync(join(PLUGIN_ROOT, "hooks/command"), {
+        encoding: "utf8",
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          TRUNK_DCI_JQ: vendoredJqPath(),
+          ...AGENT_ENV,
+          ...BAD_TOKEN_ENV,
+          TRUNK_PUBLIC_API_ADDRESS: address,
+          BUILDKITE_PLUGIN_DYNAMIC_CI_MODE: "step",
+          BUILDKITE_STEP_KEY: "unit",
+          BUILDKITE_COMMAND: `touch ${marker}`,
+        },
+      });
+    });
+
+    expect(existsSync(marker)).toBe(true);
   });
 });

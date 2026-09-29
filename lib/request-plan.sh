@@ -26,6 +26,9 @@ source "${LIB_DIR}/debug.sh"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=telemetry.sh
 source "${LIB_DIR}/telemetry.sh"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=env.sh
+source "${LIB_DIR}/env.sh"
 
 DEFAULT_API_ADDRESS="https://api.trunk.io"
 PLAN_PATH="/v2/dynamic-ci/generate-buildkite-plan"
@@ -114,8 +117,8 @@ dci_option_or_env() {
     local value="$1" name="$2"
     if [[ -n ${value} ]]; then
         echo "${value}"
-    elif [[ ${name} =~ ^[A-Za-z_][A-Za-z0-9_]*$ && -n ${!name-} ]]; then
-        echo "${!name}"
+    else
+        dci_env "${name}"
     fi
 }
 
@@ -297,7 +300,7 @@ main() {
     fi
 
     local token_env="${TRUNK_DCI_TOKEN_ENV:-TRUNK_TOKEN}" token
-    token="${!token_env-}"
+    token="$(dci_env "${token_env}")"
     if [[ -z ${token} ]]; then
         log "no Trunk API token in \$${token_env} — set it, or point token-env at the variable holding it"
         return 1

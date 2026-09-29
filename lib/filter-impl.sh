@@ -37,6 +37,9 @@ source "${PLUGIN_DIR}/lib/debug.sh"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=telemetry.sh
 source "${PLUGIN_DIR}/lib/telemetry.sh"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=env.sh
+source "${PLUGIN_DIR}/lib/env.sh"
 
 buffer="$(mktemp)"
 meta="$(mktemp)"
@@ -156,7 +159,7 @@ fi
 token_env="${BUILDKITE_PLUGIN_DYNAMIC_CI_TOKEN_ENV:-TRUNK_TOKEN}"
 started_ms="$(dci_now_ms)"
 report() {
-    dci_send_telemetry "${jq_bin}" "${!token_env-}" "$1" "$2" "$3" "${started_ms}" "${meta}"
+    dci_send_telemetry "${jq_bin}" "$(dci_env "${token_env}")" "$1" "$2" "$3" "${started_ms}" "${meta}"
 }
 
 if ! plan="$(TRUNK_DCI_JQ="${jq_bin}" TRUNK_DCI_META="${meta}" \

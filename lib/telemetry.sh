@@ -2,6 +2,8 @@
 # Plan telemetry, to the GitHub Action's endpoint: one attempt, one second, never an error.
 
 DCI_TELEMETRY_PATH="/v1/dynamic-ci/plan-metrics"
+# Found from this file, never from an inherited variable a customer's job can set.
+DCI_TELEMETRY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # A full sha is cut to 7: the server keeps at most 32 characters of the label.
 dci_plugin_ref() {
@@ -55,7 +57,7 @@ dci_send_telemetry() {
         --arg reason "${reason}" \
         --argjson duration_ms "$(($(dci_now_ms) - started_ms))" \
         --argjson job_count "${job_count}" \
-        -f "${LIB_DIR:-${PLUGIN_DIR}/lib}/telemetry.jq" 2>/dev/null)" || return 0
+        -f "${DCI_TELEMETRY_DIR}/telemetry.jq" 2>/dev/null)" || return 0
 
     body="$(mktemp)"
     printf '%b' "${escaped}" >"${body}"
