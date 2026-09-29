@@ -63,7 +63,9 @@ const gitRepoWithBranch = (): { dir: string; mergeBase: string } => {
  * `main` with `keep.txt`, `old.txt` and `gone.txt`, and a feature branch that
  * edits, renames, deletes and adds — plus `extra` more new files, for the cap.
  */
-const gitRepoWithChanges = (extra = 0): { dir: string; mergeBase: string } => {
+const gitRepoWithChanges = (
+  extra = 0,
+): { dir: string; mergeBase: string; mainTip: string } => {
   const dir = mkdtempSync(join(tmpdir(), "dci-diff-"));
   const git = (...args: readonly string[]): string =>
     execFileSync("git", [...args], {
@@ -103,7 +105,16 @@ const gitRepoWithChanges = (extra = 0): { dir: string; mergeBase: string } => {
   git("add", ".");
   git("commit", "--quiet", "-m", "change");
 
-  return { dir, mergeBase };
+  // `main` moves on after the branch point, so a direct diff from its tip and
+  // a diff from the merge base disagree.
+  git("checkout", "--quiet", "main");
+  write("main-only.txt", "m\n");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "main moves on");
+  const mainTip = git("rev-parse", "HEAD").trim();
+  git("checkout", "--quiet", "feature");
+
+  return { dir, mergeBase, mainTip };
 };
 
 /** A directory that is deliberately not a git repository, so `baseSha` is null. */
@@ -368,6 +379,91 @@ describe("the changed files", () => {
         env: { BUILDKITE_PULL_REQUEST_BASE_BRANCH: "no-such-branch" },
       }),
     ).not.toHaveProperty("changedFiles");
+  });
+});
+
+describe("the base", () => {
+  const bodyWith = (
+    env: (repo: {
+      mergeBase: string;
+      mainTip: string;
+    }) => Record<string, string>,
+  ) => {
+    const repo = gitRepoWithChanges();
+    const body = parsePlanRequest(
+      printBody({
+        cwd: repo.dir,
+        env: { BUILDKITE_PULL_REQUEST_BASE_BRANCH: "main", ...env(repo) },
+      }),
+    );
+    return { ...repo, body };
+  };
+  const pathsOf = (body: {
+    changedFiles?: { files: { path: string; status: string }[] };
+  }) => body.changedFiles?.files.map((file) => `${file.status} ${file.path}`);
+
+  it("is the merge base by default, leaving out what main added since", () => {
+    const { body, mergeBase } = bodyWith(() => ({}));
+
+    expect(body.baseSha).toBe(mergeBase);
+    expect(body.changedFiles?.base).toBe(mergeBase);
+    expect(pathsOf(body)).not.toContain("removed main-only.txt");
+  });
+
+  // Compared directly, so a file only the named base has reads as removed.
+  it("is compared to HEAD directly when base-sha names it", () => {
+    const { body, mainTip } = bodyWith(({ mainTip }) => ({
+      BUILDKITE_PLUGIN_DYNAMIC_CI_BASE_SHA: mainTip,
+    }));
+
+    expect(body.baseSha).toBe(mainTip);
+    expect(body.changedFiles?.base).toBe(mainTip);
+    expect(pathsOf(body)).toContain("removed main-only.txt");
+  });
+
+  it("is read from the variable base-sha-env names", () => {
+    const { body, mainTip } = bodyWith(({ mainTip }) => ({
+      BUILDKITE_PLUGIN_DYNAMIC_CI_BASE_SHA_ENV: "COMPARISON_BASE",
+      COMPARISON_BASE: mainTip,
+    }));
+
+    expect(body.baseSha).toBe(mainTip);
+  });
+
+  it("prefers base-sha over base-sha-env", () => {
+    const { body, mergeBase } = bodyWith(({ mergeBase, mainTip }) => ({
+      BUILDKITE_PLUGIN_DYNAMIC_CI_BASE_SHA: mergeBase,
+      BUILDKITE_PLUGIN_DYNAMIC_CI_BASE_SHA_ENV: "COMPARISON_BASE",
+      COMPARISON_BASE: mainTip,
+    }));
+
+    expect(body.baseSha).toBe(mergeBase);
+  });
+
+  it.each([
+    ["an empty variable", { COMPARISON_BASE: "" }],
+    ["something that is not a variable name", {}],
+  ])("falls back to the merge base for %s", (_name, extra) => {
+    const { body, mergeBase } = bodyWith(() => ({
+      BUILDKITE_PLUGIN_DYNAMIC_CI_BASE_SHA_ENV:
+        "COMPARISON_BASE" in extra ? "COMPARISON_BASE" : "$(echo x)",
+      ...extra,
+    }));
+
+    expect(body.baseSha).toBe(mergeBase);
+  });
+
+  // A named base git cannot resolve omits the list; the server falls back.
+  it("omits the changed files when the named base is not a commit", () => {
+    const { dir } = gitRepoWithChanges();
+
+    const body = printBody({
+      cwd: dir,
+      env: { BUILDKITE_PLUGIN_DYNAMIC_CI_BASE_SHA: "f".repeat(40) },
+    });
+
+    expect(body).toMatchObject({ baseSha: "f".repeat(40) });
+    expect(body).not.toHaveProperty("changedFiles");
   });
 });
 

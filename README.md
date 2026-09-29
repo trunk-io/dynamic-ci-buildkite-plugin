@@ -74,6 +74,8 @@ speaks up only when that command really does pass the flag.
 | `ignore-signals` | unset         | Comma-separated signal identifiers to exclude from the recommendation.                                                                                                                                                         |
 | `commit-sha`     | unset         | The commit to report instead of `BUILDKITE_COMMIT`, such as the pull request's head when your checkout builds a merge commit.                                                                                                  |
 | `commit-sha-env` | unset         | Name of the environment variable holding that commit, read when the job runs. Use it when the pipeline is not generated per build. `commit-sha` wins when both are set.                                                        |
+| `base-sha`       | unset         | The commit to diff against instead of the merge base with the pull request's base branch. Compared to the checked-out commit directly.                                                                                         |
+| `base-sha-env`   | unset         | Name of the environment variable holding that commit, read when the job runs. `base-sha` wins when both are set.                                                                                                               |
 
 **The token must reach the step without passing through the pipeline
 definition.** Two things are interpolated into the uploaded pipeline at upload

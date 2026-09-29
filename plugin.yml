@@ -60,6 +60,16 @@ configuration:
         runs. Use it when the pipeline is not generated per build. commit-sha
         wins when both are set.
       type: string
+    base-sha:
+      description:
+        The commit to diff against instead of the merge base with the pull
+        request's base branch. Compared to the checked-out commit directly.
+      type: string
+    base-sha-env:
+      description:
+        Name of the environment variable holding that commit, read when the job
+        runs. base-sha wins when both are set.
+      type: string
     ignore-signals:
       description: Comma-separated signal identifiers to exclude from the recommendation.
       type: string
