@@ -34,8 +34,15 @@ source "${PLUGIN_DIR}/lib/notice.sh"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=debug.sh
 source "${PLUGIN_DIR}/lib/debug.sh"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=telemetry.sh
+source "${PLUGIN_DIR}/lib/telemetry.sh"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=env.sh
+source "${PLUGIN_DIR}/lib/env.sh"
 
 buffer="$(mktemp)"
+meta="$(mktemp)"
 emitted=false
 
 log() { echo "$1" >&2; }
@@ -48,7 +55,7 @@ safety_net() {
         log "--- :trunk: Dynamic CI exited unexpectedly — pipeline unchanged"
         cat "${buffer}" 2>/dev/null
     fi
-    rm -f "${buffer}"
+    rm -f "${buffer}" "${meta}"
 }
 trap safety_net EXIT
 
@@ -149,9 +156,16 @@ if [[ ${keys} == "[]" ]]; then
     emit_unchanged
 fi
 
-if ! plan="$(TRUNK_DCI_JQ="${jq_bin}" \
-    TRUNK_DCI_TOKEN_ENV="${BUILDKITE_PLUGIN_DYNAMIC_CI_TOKEN_ENV:-TRUNK_TOKEN}" \
+token_env="${BUILDKITE_PLUGIN_DYNAMIC_CI_TOKEN_ENV:-TRUNK_TOKEN}"
+started_ms="$(dci_now_ms)"
+report() {
+    dci_send_telemetry "${jq_bin}" "$(dci_env "${token_env}")" "$1" "$2" "$3" "${started_ms}" "${meta}"
+}
+
+if ! plan="$(TRUNK_DCI_JQ="${jq_bin}" TRUNK_DCI_META="${meta}" \
+    TRUNK_DCI_TOKEN_ENV="${token_env}" \
     "${PLUGIN_DIR}/lib/request-plan.sh" "${keys}")"; then
+    report 2 "$("${jq_bin}" -r '.reason // "internal"' "${meta}" 2>/dev/null || echo internal)" 0
     log "--- :trunk: Dynamic CI is unavailable — running every step"
     emit_unchanged
 fi
@@ -160,15 +174,21 @@ dci_debug_block "${jq_bin}" "plan" "${plan}"
 dci_log_notice "${jq_bin}" "${plan}"
 
 if ! skips="$("${jq_bin}" -c -f "${PLUGIN_DIR}/lib/plan-to-skips.jq" <<<"${plan}")"; then
+    report 2 invalid_response 0
     log "--- :trunk: Dynamic CI returned a plan this version cannot read — pipeline unchanged"
     emit_unchanged
 fi
 
 if ! mutated="$("${jq_bin}" --argjson skips "${skips}" \
     -f "${PLUGIN_DIR}/lib/apply-skips.jq" <<<"${rendered}")"; then
+    report 2 internal 0
     log "--- :trunk: Dynamic CI could not apply its plan — pipeline unchanged"
     emit_unchanged
 fi
+
+outcome="$("${jq_bin}" -r -f "${PLUGIN_DIR}/lib/plan-outcome.jq" <<<"${plan}" 2>/dev/null)" ||
+    outcome="2 internal"
+report "${outcome%% *}" "${outcome#* }" "$("${jq_bin}" '.jobs | length' <<<"${plan}" 2>/dev/null || echo 0)"
 
 # Never between here and `emit`: a failure to describe what was done must not
 # stop the pipeline that was already correctly built from going out.

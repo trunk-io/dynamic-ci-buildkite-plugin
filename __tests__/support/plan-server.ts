@@ -5,7 +5,13 @@ import { type CiPlan, parsePlan } from "./contract";
 /** What the filter or hook actually sent, captured for assertions. */
 export interface CapturedRequest {
   received?: unknown;
+  userAgent?: string;
+  /** Raw protobuf bodies sent to the telemetry path, in order. */
+  telemetry?: Buffer[];
+  telemetryUserAgent?: string;
 }
+
+export const TELEMETRY_PATH = "/v1/dynamic-ci/plan-metrics";
 
 /**
  * A plan endpoint on loopback, so curl, the request body and the response
@@ -25,14 +31,26 @@ export const withPlanServer = async (
   plan: CiPlan,
   captured: CapturedRequest,
   run: (address: string) => Promise<void>,
+  { status = 200 }: { status?: number } = {},
 ): Promise<void> => {
   const body = JSON.stringify(parsePlan(plan));
   const server: Server = createServer((req, res) => {
     const parts: Buffer[] = [];
     req.on("data", (chunk: Buffer) => parts.push(chunk));
     req.on("end", () => {
+      if (req.url === TELEMETRY_PATH) {
+        captured.telemetry = [
+          ...(captured.telemetry ?? []),
+          Buffer.concat(parts),
+        ];
+        captured.telemetryUserAgent = req.headers["user-agent"];
+        res.writeHead(200);
+        res.end();
+        return;
+      }
+      captured.userAgent = req.headers["user-agent"];
       captured.received = JSON.parse(Buffer.concat(parts).toString("utf8"));
-      res.writeHead(200, { "Content-Type": "application/json" });
+      res.writeHead(status, { "Content-Type": "application/json" });
       res.end(body);
     });
   });
