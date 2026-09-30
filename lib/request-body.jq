@@ -21,6 +21,15 @@ def signals:
   | map(ascii_downcase | gsub("^\\s+|\\s+$"; ""))
   | map(select(. != ""));
 
+# `BUILDKITE_PULL_REQUEST_LABELS` is comma-separated. Case is kept: the service
+# matches labels case-insensitively and records them as the pull request spelled
+# them.
+def labels:
+  $prLabels
+  | split(",")
+  | map(gsub("^\\s+|\\s+$"; ""))
+  | map(select(. != ""));
+
 {
   repo: { host: $host, owner: $owner, name: $name },
   commitSha: $commitSha,
@@ -36,5 +45,6 @@ def signals:
 + optional("triggeringActor"; $triggeringActor)
 + optional("eventName"; $eventName)
 + (if $ignoreSignals == "" then {} else { ignoreSignals: signals } end)
++ (if (labels | length) == 0 then {} else { prLabels: labels } end)
 # Slurped: empty when the diff could not be taken, which omits the field.
 + (if ($changedFiles | length) == 0 then {} else { changedFiles: $changedFiles[0] } end)

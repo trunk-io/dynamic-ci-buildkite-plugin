@@ -216,6 +216,23 @@ describe("the plan request body", () => {
     expect(body).not.toHaveProperty("eventName");
   });
 
+  it("splits the pull request's labels on commas, keeping their case", () => {
+    const body = parsePlanRequest(
+      printBody({
+        env: { BUILDKITE_PULL_REQUEST_LABELS: "Ready for CI, bug,,size/S " },
+      }),
+    );
+
+    expect(body.prLabels).toEqual(["Ready for CI", "bug", "size/S"]);
+  });
+
+  it("omits prLabels when the pull request has no labels", () => {
+    expect(printBody()).not.toHaveProperty("prLabels");
+    expect(
+      printBody({ env: { BUILDKITE_PULL_REQUEST_LABELS: "" } }),
+    ).not.toHaveProperty("prLabels");
+  });
+
   it("splits ignore-signals and drops the empties", () => {
     const body = parsePlanRequest(
       printBody({

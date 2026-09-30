@@ -162,6 +162,7 @@ dci_build_body() {
         --arg orgSlug "${BUILDKITE_ORGANIZATION_SLUG-}" \
         --arg pipelineSlug "${BUILDKITE_PIPELINE_SLUG-}" \
         --arg ignoreSignals "${BUILDKITE_PLUGIN_DYNAMIC_CI_IGNORE_SIGNALS-}" \
+        --arg prLabels "${BUILDKITE_PULL_REQUEST_LABELS-}" \
         --argjson jobKeys "${job_keys}" \
         --slurpfile changedFiles "${changed_files}" \
         -f "${LIB_DIR}/request-body.jq"
