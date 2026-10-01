@@ -184,15 +184,25 @@ dci_note_outcome() {
         '{repo: $repo, reason: $reason}' >"${TRUNK_DCI_META}" 2>/dev/null || true
 }
 
+# `--retry` alone gives up at once on a connection reset or refusal; the Action
+# retries those. Probed because curl before 7.71 rejects the flag outright.
+dci_curl_retries_all_errors() {
+    [[ "$(curl --help all 2>/dev/null)" == *--retry-all-errors* ]]
+}
+
 dci_post() {
     local body_file="$1" token="$2" url="$3" jq_bin="$4" response status code
+    local -a retry_flags=(--retry "${RETRIES}" --retry-delay 1)
 
     response="$(mktemp)"
     # shellcheck disable=SC2064  # expand now: $response must not change later
     trap "rm -f '${response}'" RETURN
 
+    if dci_curl_retries_all_errors; then
+        retry_flags+=(--retry-all-errors)
+    fi
     status="$(curl -sS -o "${response}" -w '%{http_code}' \
-        --max-time "${TIMEOUT_SECONDS}" --retry "${RETRIES}" --retry-delay 1 \
+        --max-time "${TIMEOUT_SECONDS}" "${retry_flags[@]}" \
         -X POST "${url}" \
         -A "$(dci_user_agent "${jq_bin}")" \
         -H "Authorization: Bearer ${token}" \
