@@ -9,6 +9,8 @@ export interface CapturedRequest {
   /** Raw protobuf bodies sent to the telemetry path, in order. */
   telemetry?: Buffer[];
   telemetryUserAgent?: string;
+  /** Plan requests the server dropped without answering. */
+  resets?: number;
 }
 
 export const TELEMETRY_PATH = "/v1/dynamic-ci/plan-metrics";
@@ -31,10 +33,17 @@ export const withPlanServer = async (
   plan: CiPlan,
   captured: CapturedRequest,
   run: (address: string) => Promise<void>,
-  { status = 200 }: { status?: number } = {},
+  { status = 200, resets = 0 }: { status?: number; resets?: number } = {},
 ): Promise<void> => {
   const body = JSON.stringify(parsePlan(plan));
+  let resetsLeft = resets;
   const server: Server = createServer((req, res) => {
+    if (req.url !== TELEMETRY_PATH && resetsLeft > 0) {
+      resetsLeft -= 1;
+      captured.resets = (captured.resets ?? 0) + 1;
+      req.socket.destroy();
+      return;
+    }
     const parts: Buffer[] = [];
     req.on("data", (chunk: Buffer) => parts.push(chunk));
     req.on("end", () => {
