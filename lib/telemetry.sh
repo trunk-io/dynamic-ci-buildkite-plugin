@@ -5,12 +5,29 @@ DCI_TELEMETRY_PATH="/v1/dynamic-ci/plan-metrics"
 # Found from this file, never from an inherited variable a customer's job can set.
 DCI_TELEMETRY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Only when the plugin is the checkout's root: a copy vendored inside another
+# repository would otherwise report that repository's commit as ours.
+dci_checkout_ref() {
+    local root
+    root="$(cd "${DCI_TELEMETRY_DIR}/.." 2>/dev/null && pwd -P)" || return 0
+    command -v git >/dev/null 2>&1 || return 0
+    (
+        unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+        [[ "$(git -C "${root}" rev-parse --show-toplevel 2>/dev/null)" == "${root}" ]] || exit 0
+        git -C "${root}" describe --tags --exact-match HEAD 2>/dev/null ||
+            git -C "${root}" rev-parse --short=7 HEAD 2>/dev/null
+    ) </dev/null 2>/dev/null || true
+}
+
 # A full sha is cut to 7: the server keeps at most 32 characters of the label.
 dci_plugin_ref() {
     local jq_bin="$1" ref
     ref="$("${jq_bin}" -r '[.[] | keys[] | select(test("dynamic-ci"; "i"))][0] // ""
         | if contains("#") then split("#") | last else "" end' \
         <<<"${BUILDKITE_PLUGINS:-[]}" 2>/dev/null)" || ref=""
+    if [[ -z ${ref} ]]; then
+        ref="$(dci_checkout_ref)" || ref=""
+    fi
     if [[ ${ref} =~ ^[0-9a-fA-F]{40}$ ]]; then
         ref="${ref:0:7}"
     fi
