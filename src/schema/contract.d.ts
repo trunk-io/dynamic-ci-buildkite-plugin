@@ -96,6 +96,15 @@ export interface components {
              */
             eventName?: string;
             /**
+             * @deprecated
+             * @description Ignored. Trunk reads the pull request's labels itself when the run asks for a plan. While the repository is in Learning mode, a pull request carrying a label on the repository's managed allow list (matched case-insensitively) is gated as if Dynamic CI were enabled. Accepted so that older clients still validate.
+             * @example [
+             *       "bug",
+             *       "ready-for-ci"
+             *     ]
+             */
+            prLabels?: string[];
+            /**
              * @description The step `key:` values to decide — what Trunk ingests from `buildkite.step.key`. **Empty means every keyed step in the pipeline** — the usual call.
              * @default []
              * @example [
@@ -174,7 +183,7 @@ export interface components {
             files: components["schemas"]["ChangedFile"][];
         };
         CiPlan: {
-            /** @description One verdict per job. **A job absent from this list must be run** — the documented fail-safe, and how an unrecognized job, a merge-queue branch, and a not-yet-enabled organization are all reported. */
+            /** @description One verdict per job. **A job absent from this list must be run** — the documented fail-safe, and how an unrecognized job, a CI job experiment branch, and a not-yet-enabled organization are all reported. */
             jobs: components["schemas"]["JobVerdict"][];
             notice?: components["schemas"]["PlanNotice"];
         };
@@ -218,6 +227,15 @@ export interface components {
              */
             eventName?: string;
             /**
+             * @deprecated
+             * @description Ignored. Trunk reads the pull request's labels itself when the run asks for a plan. While the repository is in Learning mode, a pull request carrying a label on the repository's managed allow list (matched case-insensitively) is gated as if Dynamic CI were enabled. Accepted so that older clients still validate.
+             * @example [
+             *       "bug",
+             *       "ready-for-ci"
+             *     ]
+             */
+            prLabels?: string[];
+            /**
              * @description The `jobs:` keys to decide. **Empty means every keyed job in the workflow** — the usual call.
              * @default []
              * @example [
@@ -258,10 +276,10 @@ export interface components {
             /** @description The audit trail behind `summary`, abstentions included. */
             signals: components["schemas"]["SignalResult"][];
         };
-        /** @description Why this plan has the shape it does. **Absent unless every job runs for a reason `jobs` cannot express**: a not-yet-enabled organization or repository, a merge-queue branch, an engine outage, or a workflow Trunk has not enumerated — all indistinguishable otherwise, and all arriving as an empty `jobs` when you request a whole workflow. `REPO_IN_SHADOW_MODE` is the exception: the plan is fully populated and each `summary` is the recommendation the job would have received, but nothing is allowed to skip. */
+        /** @description Why this plan has the shape it does. **Absent unless every job runs for a reason `jobs` cannot express**: a not-yet-enabled organization or repository, a CI job experiment branch (`trunk-runners/experiments/`), an engine outage, or a workflow Trunk has not enumerated — all indistinguishable otherwise, and all arriving as an empty `jobs` when you request a whole workflow. `REPO_IN_SHADOW_MODE` is the exception: the plan is fully populated and each `summary` is the recommendation the job would have received, but nothing is allowed to skip. */
         PlanNotice: {
             /**
-             * @description A stable identifier for the condition, safe to branch on. Today: `ORG_NOT_ENABLED`, `REPO_NOT_ENABLED`, `REPO_IN_SHADOW_MODE`, `ENGINE_UNAVAILABLE`, `WORKFLOW_NOT_RECOGNIZED`. `MERGE_QUEUE_BRANCH` is retired and no longer sent — merge-queue runs now carry real per-job verdicts. **An open set** — fall back to `message` for a code you do not recognize.
+             * @description A stable identifier for the condition, safe to branch on. Today: `ORG_NOT_ENABLED`, `REPO_NOT_ENABLED`, `REPO_IN_SHADOW_MODE`, `ENGINE_UNAVAILABLE`, `WORKFLOW_NOT_RECOGNIZED`, `EXPERIMENT_BRANCH` (a Trunk Runners experiment branch, where every job runs). `MERGE_QUEUE_BRANCH` is retired and no longer sent — merge-queue runs now carry real per-job verdicts. **An open set** — fall back to `message` for a code you do not recognize.
              * @example ORG_NOT_ENABLED
              */
             code: string;
@@ -294,7 +312,7 @@ export interface components {
             recommendation: components["schemas"]["SignalRecommendation"];
             /**
              * @description Human-readable evidence for this signal's contribution.
-             * @example Passed 98% of 240 runs in the last 14 days.
+             * @example Reliably green (98.0% pass rate over 240 runs).
              */
             message: string;
             /**
@@ -308,7 +326,7 @@ export interface components {
          * @example historical-pass-rate
          * @enum {string}
          */
-        SignalType: "estimated-cost" | "previous-result-on-pr" | "historical-pass-rate" | "diff-driven-volatility" | "force-override" | "merge-failure" | "mid-pr-stack" | "required-check" | "merge-queue-is-required" | "paths-filter";
+        SignalType: "estimated-cost" | "previous-result-on-pr" | "historical-pass-rate" | "diff-driven-volatility" | "force-override" | "merge-failure" | "mid-pr-stack" | "required-check" | "merge-queue-is-required" | "paths-filter" | "draft-pull-request";
     };
     responses: never;
     parameters: never;
