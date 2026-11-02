@@ -73,4 +73,22 @@ configuration:
     ignore-signals:
       description: Comma-separated signal identifiers to exclude from the recommendation.
       type: string
+    impact:
+      description:
+        How much of the codebase the change affects, as your build tool
+        measures it. On steps with Trunk's impact reach signal on, a broad change
+        leans toward running and a change that affects everything always runs.
+        Omit it when your tool did not compute it.
+      type: object
+      properties:
+        count:
+          description: How many units the change affects. Required unless `all` is true.
+          type: [integer, string]
+        all:
+          description: The change affects everything.
+          type: boolean
+        source:
+          description: A label for the measure, at most 64 characters.
+          type: string
+      additionalProperties: false
   additionalProperties: false

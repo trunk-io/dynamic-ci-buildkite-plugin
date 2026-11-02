@@ -241,6 +241,120 @@ describe("the plan request body", () => {
   });
 });
 
+const impactEnv = (
+  impact: Readonly<{ count?: string; all?: string; source?: string }>,
+): Record<string, string> => ({
+  ...(impact.count === undefined
+    ? {}
+    : { BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_COUNT: impact.count }),
+  ...(impact.all === undefined
+    ? {}
+    : { BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_ALL: impact.all }),
+  ...(impact.source === undefined
+    ? {}
+    : { BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_SOURCE: impact.source }),
+});
+
+/** The body and the build log, for a value the script must drop with a warning. */
+const printBodyAndLog = (
+  env: Readonly<Record<string, string>>,
+): { body: unknown; log: string } => {
+  const result = spawnSync(
+    join(PLUGIN_ROOT, "lib/request-plan.sh"),
+    ["--print-body", JSON.stringify(["unit"])],
+    {
+      cwd: nonGitDir(),
+      encoding: "utf8",
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        TRUNK_DCI_JQ: vendoredJqPath(),
+        ...AGENT_ENV,
+        ...env,
+      },
+    },
+  );
+  return { body: JSON.parse(result.stdout), log: result.stderr };
+};
+
+describe("the impact", () => {
+  it.each([
+    {
+      name: "a count with its source",
+      impact: { count: "734", all: "false", source: "tainted-packages" },
+      sent: { count: 734, all: false, source: "tainted-packages" },
+    },
+    {
+      name: "nothing affected",
+      impact: { count: "0" },
+      sent: { count: 0, all: false },
+    },
+    {
+      name: "everything affected",
+      impact: { all: "true", source: "tainted-packages" },
+      sent: { all: true, source: "tainted-packages" },
+    },
+    {
+      name: "everything affected beside a count that does not parse",
+      impact: { all: "true", count: "lots" },
+      sent: { all: true },
+    },
+  ])("sends $name", ({ impact, sent }) => {
+    const body = parsePlanRequest(printBody({ env: impactEnv(impact) }));
+
+    expect(body.impact).toEqual(sent);
+  });
+
+  it("omits the impact when the option is unset", () => {
+    expect(printBody()).not.toHaveProperty("impact");
+  });
+
+  it.each([
+    {
+      name: "a negative count",
+      impact: { count: "-1" },
+      warning:
+        "Dynamic CI: impact.count must be a whole number from 0 to 10000000, not '-1'; sending no impact",
+    },
+    {
+      name: "a count above the cap",
+      impact: { count: "10000001" },
+      warning:
+        "Dynamic CI: impact.count must be a whole number from 0 to 10000000, not '10000001'; sending no impact",
+    },
+    {
+      name: "a source with no count",
+      impact: { source: "tainted-packages" },
+      warning:
+        "Dynamic CI: impact.count must be a whole number from 0 to 10000000, not ''; sending no impact",
+    },
+    {
+      name: "an all that is not a boolean",
+      impact: { count: "3", all: "yes" },
+      warning:
+        "Dynamic CI: impact.all must be true or false, not 'yes'; sending no impact",
+    },
+  ])(
+    "drops $name with a warning and still builds the body",
+    ({ impact, warning }) => {
+      const { body, log } = printBodyAndLog(impactEnv(impact));
+
+      expect(parsePlanRequest(body)).not.toHaveProperty("impact");
+      expect(log.trim()).toBe(warning);
+    },
+  );
+
+  it("drops a source over 64 characters and keeps the count", () => {
+    const { body, log } = printBodyAndLog(
+      impactEnv({ count: "3", source: "x".repeat(65) }),
+    );
+
+    expect(parsePlanRequest(body).impact).toEqual({ count: 3, all: false });
+    expect(log.trim()).toBe(
+      "Dynamic CI: impact.source is longer than 64 characters; sending the impact without it",
+    );
+  });
+});
+
 describe("the remote parse", () => {
   const repoFor = (remote: string): unknown => {
     const body = printBody({ env: { BUILDKITE_REPO: remote } });
