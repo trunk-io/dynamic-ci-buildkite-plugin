@@ -36,6 +36,8 @@ PLAN_PATH="/v2/dynamic-ci/generate-buildkite-plan"
 TIMEOUT_SECONDS=30
 RETRIES=2
 MAX_CHANGED_FILES=200
+MAX_IMPACT_COUNT=10000000
+MAX_IMPACT_SOURCE_LENGTH=64
 
 log() { echo "$1" >&2; }
 
@@ -139,6 +141,51 @@ dci_pr_number() {
     echo "${pr}"
 }
 
+# The `impact` option as JSON, or `null` when it is unset or unreadable. Dropping
+# it costs only the impact-reach signal, which abstains; it never fails the plan.
+dci_impact() {
+    local jq_bin="$1"
+    local count="${BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_COUNT-}"
+    local all="${BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_ALL-}"
+    local source="${BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_SOURCE-}"
+
+    if [[ -z ${count}${all}${source} ]]; then
+        echo null
+        return 0
+    fi
+
+    # A case per spelling rather than `${all,,}`: macOS agents run bash 3.2.
+    case "${all}" in
+    "" | false | False | FALSE) all=false ;;
+    true | True | TRUE) all=true ;;
+    *)
+        log "Dynamic CI: impact.all must be true or false, not '${all}'; sending no impact"
+        echo null
+        return 0
+        ;;
+    esac
+
+    if [[ ! ${count} =~ ^[0-9]{1,8}$ ]] || ((10#${count} > MAX_IMPACT_COUNT)); then
+        if [[ ${all} == false ]]; then
+            log "Dynamic CI: impact.count must be a whole number from 0 to ${MAX_IMPACT_COUNT}, not '${count}'; sending no impact"
+            echo null
+            return 0
+        fi
+        count=""
+    fi
+
+    if ((${#source} > MAX_IMPACT_SOURCE_LENGTH)); then
+        log "Dynamic CI: impact.source is longer than ${MAX_IMPACT_SOURCE_LENGTH} characters; sending the impact without it"
+        source=""
+    fi
+
+    # shellcheck disable=SC2016 # jq variables, bound by --arg, not shell ones
+    "${jq_bin}" -cn --arg count "${count}" --argjson all "${all}" --arg source "${source}" \
+        '{all: $all}
+        + (if $count == "" then {} else {count: ($count | tonumber)} end)
+        + (if $source == "" then {} else {source: $source} end)'
+}
+
 dci_build_body() {
     local jq_bin="$1" job_keys="$2" host="$3" repo_path="$4" base="$5"
     local changed_files="$6"
@@ -169,6 +216,7 @@ dci_build_body() {
         --arg pipelineSlug "${BUILDKITE_PIPELINE_SLUG-}" \
         --arg ignoreSignals "${BUILDKITE_PLUGIN_DYNAMIC_CI_IGNORE_SIGNALS-}" \
         --argjson jobKeys "${job_keys}" \
+        --argjson impact "$(dci_impact "${jq_bin}")" \
         --slurpfile changedFiles "${changed_files}" \
         -f "${LIB_DIR}/request-body.jq"
 }
