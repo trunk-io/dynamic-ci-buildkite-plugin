@@ -112,9 +112,10 @@ plugins:
 
 Send `count: 0` when nothing is affected, and leave a source out when your tool
 did not compute it. At most 8 entries. A caller that runs
-`trunk-dynamic-ci-filter` itself sets the same values as
-`BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS_0_SOURCE`, `_0_COUNT` and `_0_ALL`, then
-`_1_SOURCE` and so on for the next entry. An unreadable entry is dropped with a
+`trunk-dynamic-ci-filter` itself sets `BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS` to
+the same list as JSON, for example
+`[{"source":"tainted-packages","count":734}]`; it takes precedence over the
+option. An unreadable entry, or one with an unknown key, is dropped with a
 warning in the build log, and the plan is still requested.
 
 ## Every keyed step is a candidate
