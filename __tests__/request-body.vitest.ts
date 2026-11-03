@@ -241,21 +241,30 @@ describe("the plan request body", () => {
   });
 });
 
-const impactEnv = (
-  impact: Readonly<{ count?: string; all?: string; source?: string }>,
-): Record<string, string> => ({
-  ...(impact.count === undefined
-    ? {}
-    : { BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_COUNT: impact.count }),
-  ...(impact.all === undefined
-    ? {}
-    : { BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_ALL: impact.all }),
-  ...(impact.source === undefined
-    ? {}
-    : { BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_SOURCE: impact.source }),
-});
+interface ImpactInput {
+  source?: string;
+  count?: string;
+  all?: string;
+}
 
-/** The body and the build log, for a value the script must drop with a warning. */
+/** The env Buildkite sets for an `impacts` list: IMPACTS_<n>_SOURCE and so on. */
+const impactsEnv = (impacts: readonly ImpactInput[]): Record<string, string> =>
+  Object.fromEntries(
+    impacts.flatMap((impact, index) =>
+      (["source", "count", "all"] as const).flatMap((key) => {
+        const value = impact[key];
+        return value === undefined
+          ? []
+          : [
+              [
+                `BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS_${String(index)}_${key.toUpperCase()}`,
+                value,
+              ],
+            ];
+      }),
+    ),
+  );
+
 const printBodyAndLog = (
   env: Readonly<Record<string, string>>,
 ): { body: unknown; log: string } => {
@@ -276,81 +285,103 @@ const printBodyAndLog = (
   return { body: JSON.parse(result.stdout), log: result.stderr };
 };
 
-describe("the impact", () => {
-  it.each([
-    {
-      name: "a count with its source",
-      impact: { count: "734", all: "false", source: "tainted-packages" },
-      sent: { count: 734, all: false, source: "tainted-packages" },
-    },
-    {
-      name: "nothing affected",
-      impact: { count: "0" },
-      sent: { count: 0, all: false },
-    },
-    {
-      name: "everything affected",
-      impact: { all: "true", source: "tainted-packages" },
-      sent: { all: true, source: "tainted-packages" },
-    },
-    {
-      name: "everything affected beside a count that does not parse",
-      impact: { all: "true", count: "lots" },
-      sent: { all: true },
-    },
-  ])("sends $name", ({ impact, sent }) => {
-    const body = parsePlanRequest(printBody({ env: impactEnv(impact) }));
+describe("the impacts", () => {
+  it("sends every entry, in order", () => {
+    const body = parsePlanRequest(
+      printBody({
+        env: impactsEnv([
+          { source: "tainted-packages", count: "734", all: "false" },
+          { source: "test-files", count: "0" },
+          { source: "targets", all: "true" },
+          { source: "affected.v2_x", all: "true", count: "lots" },
+        ]),
+      }),
+    );
 
-    expect(body.impact).toEqual(sent);
+    expect(body.impacts).toEqual([
+      { source: "tainted-packages", count: 734, all: false },
+      { source: "test-files", count: 0, all: false },
+      { source: "targets", all: true },
+      { source: "affected.v2_x", all: true },
+    ]);
   });
 
-  it("omits the impact when the option is unset", () => {
-    expect(printBody()).not.toHaveProperty("impact");
+  it("omits the impacts when the option is unset", () => {
+    expect(printBody()).not.toHaveProperty("impacts");
   });
 
   it.each([
+    {
+      name: "a source that is not a slug",
+      impacts: [{ source: "Tainted", count: "1" }],
+      warning:
+        "Dynamic CI: impacts[1].source must be lowercase letters, digits, '.', '_' or '-', at most 64 characters, not 'Tainted'; dropping it",
+    },
+    {
+      name: "an entry with no source",
+      impacts: [{ count: "1" }],
+      warning:
+        "Dynamic CI: impacts[1].source must be lowercase letters, digits, '.', '_' or '-', at most 64 characters, not ''; dropping it",
+    },
     {
       name: "a negative count",
-      impact: { count: "-1" },
+      impacts: [{ source: "test-files", count: "-1" }],
       warning:
-        "Dynamic CI: impact.count must be a whole number from 0 to 10000000, not '-1'; sending no impact",
+        "Dynamic CI: impacts[1].count must be a whole number from 0 to 10000000, not '-1'; dropping test-files",
     },
     {
       name: "a count above the cap",
-      impact: { count: "10000001" },
+      impacts: [{ source: "test-files", count: "10000001" }],
       warning:
-        "Dynamic CI: impact.count must be a whole number from 0 to 10000000, not '10000001'; sending no impact",
-    },
-    {
-      name: "a source with no count",
-      impact: { source: "tainted-packages" },
-      warning:
-        "Dynamic CI: impact.count must be a whole number from 0 to 10000000, not ''; sending no impact",
+        "Dynamic CI: impacts[1].count must be a whole number from 0 to 10000000, not '10000001'; dropping test-files",
     },
     {
       name: "an all that is not a boolean",
-      impact: { count: "3", all: "yes" },
+      impacts: [{ source: "test-files", count: "3", all: "yes" }],
       warning:
-        "Dynamic CI: impact.all must be true or false, not 'yes'; sending no impact",
+        "Dynamic CI: impacts[1].all must be true or false, not 'yes'; dropping test-files",
+    },
+    {
+      name: "a source listed twice",
+      impacts: [{ source: "tainted-packages", count: "2" }],
+      warning:
+        "Dynamic CI: impacts lists tainted-packages more than once; keeping the first",
     },
   ])(
-    "drops $name with a warning and still builds the body",
-    ({ impact, warning }) => {
-      const { body, log } = printBodyAndLog(impactEnv(impact));
+    "drops $name with a warning and keeps the rest",
+    ({ impacts, warning }) => {
+      const { body, log } = printBodyAndLog(
+        impactsEnv([{ source: "tainted-packages", count: "1" }, ...impacts]),
+      );
 
-      expect(parsePlanRequest(body)).not.toHaveProperty("impact");
+      expect(parsePlanRequest(body).impacts).toEqual([
+        { source: "tainted-packages", count: 1, all: false },
+      ]);
       expect(log.trim()).toBe(warning);
     },
   );
 
-  it("drops a source over 64 characters and keeps the count", () => {
-    const { body, log } = printBodyAndLog(
-      impactEnv({ count: "3", source: "x".repeat(65) }),
+  it("omits the impacts when every entry is dropped", () => {
+    const { body } = printBodyAndLog(
+      impactsEnv([{ source: "test-files", count: "-1" }]),
     );
 
-    expect(parsePlanRequest(body).impact).toEqual({ count: 3, all: false });
+    expect(parsePlanRequest(body)).not.toHaveProperty("impacts");
+  });
+
+  it("sends at most 8 entries", () => {
+    const { body, log } = printBodyAndLog(
+      impactsEnv(
+        Array.from({ length: 9 }, (_unused, index) => ({
+          source: `s${String(index)}`,
+          count: "1",
+        })),
+      ),
+    );
+
+    expect(parsePlanRequest(body).impacts).toHaveLength(8);
     expect(log.trim()).toBe(
-      "Dynamic CI: impact.source is longer than 64 characters; sending the impact without it",
+      "Dynamic CI: impacts has more than 8 entries; dropping s8",
     );
   });
 });

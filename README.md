@@ -76,7 +76,7 @@ speaks up only when that command really does pass the flag.
 | `commit-sha-env` | unset         | Name of the environment variable holding that commit, read when the job runs. Use it when the pipeline is not generated per build. `commit-sha` wins when both are set.                                                        |
 | `base-sha`       | unset         | The commit to diff against instead of the merge base with the pull request's base branch. Compared to the checked-out commit directly.                                                                                         |
 | `base-sha-env`   | unset         | Name of the environment variable holding that commit, read when the job runs. `base-sha` wins when both are set.                                                                                                               |
-| `impact`         | unset         | How much of the codebase the change affects, as your build tool measures it: `count`, `all` and `source`. See [Impact reach](#impact-reach).                                                                                   |
+| `impacts`        | unset         | How much of the codebase the change affects, one entry per measure: `source`, `count` and `all`. See [Impact reach](#impact-reach).                                                                                            |
 
 **The token must reach the step without passing through the pipeline
 definition.** Two things are interpolated into the uploaded pipeline at upload
@@ -86,32 +86,36 @@ agent's own environment — and point `token-env` at the variable's name.
 
 ## Impact reach
 
-Send how much of the codebase the change affects, as your own build or
-dependency tool measures it. On steps where Trunk's impact reach signal is on,
+Send how much of the codebase the change affects, by each measure your own build
+or dependency tool computes. On steps where Trunk's impact reach signal is on,
 Dynamic CI always runs a change that affects everything, leans toward running a
-broad change and leans slightly toward skipping a narrow one. Sending nothing
-leaves every verdict as it is.
+broad change and leans slightly toward skipping a narrow one. Trunk sets each
+step's limit per source. Sending nothing leaves every verdict as it is.
 
 ```yaml
 plugins:
   - trunk-io/dynamic-ci#v<version>:
-      impact:
-        count: 734
-        all: false
-        source: tainted-packages
+      impacts:
+        - source: tainted-packages
+          count: 734
+        - source: test-files
+          count: 1200
 ```
 
+- `source`: the measure, such as `tainted-packages` or `test-files`. Lowercase
+  letters, digits, `.`, `_` and `-`, at most 64 characters. Send each source once,
+  and keep its measure the same on every build.
 - `count`: how many units the change affects (packages, targets, test files or
-  tests). Send the same measure on every build. Required unless `all` is true.
+  tests). Required unless `all` is true.
 - `all`: the tool says the change affects everything, or could not work out what
   is affected. Never send a large `count` in its place.
-- `source`: a label for the measure, at most 64 characters.
 
-Send `count: 0` when nothing is affected, and leave `impact` out when your tool
-did not compute it. A caller that runs `trunk-dynamic-ci-filter` itself sets the
-same values as `BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_COUNT`, `_ALL` and `_SOURCE`.
-An unreadable value is dropped with a warning in the build log, and the plan is
-still requested.
+Send `count: 0` when nothing is affected, and leave a source out when your tool
+did not compute it. At most 8 entries. A caller that runs
+`trunk-dynamic-ci-filter` itself sets the same values as
+`BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS_0_SOURCE`, `_0_COUNT` and `_0_ALL`, then
+`_1_SOURCE` and so on for the next entry. An unreadable entry is dropped with a
+warning in the build log, and the plan is still requested.
 
 ## Every keyed step is a candidate
 

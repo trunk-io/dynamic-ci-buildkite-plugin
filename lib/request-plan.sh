@@ -37,7 +37,7 @@ TIMEOUT_SECONDS=30
 RETRIES=2
 MAX_CHANGED_FILES=200
 MAX_IMPACT_COUNT=10000000
-MAX_IMPACT_SOURCE_LENGTH=64
+MAX_IMPACTS=8
 
 log() { echo "$1" >&2; }
 
@@ -141,16 +141,18 @@ dci_pr_number() {
     echo "${pr}"
 }
 
-# The `impact` option as JSON, or `null` when it is unset or unreadable. Dropping
-# it costs only the impact-reach signal, which abstains; it never fails the plan.
-dci_impact() {
-    local jq_bin="$1"
-    local count="${BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_COUNT-}"
-    local all="${BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_ALL-}"
-    local source="${BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACT_SOURCE-}"
+# One `impacts` entry as JSON, or nothing (with a warning) when it is unreadable.
+dci_impact_entry() {
+    local jq_bin="$1" index="$2"
+    local prefix="BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS_${index}"
+    local source count all
+    source="$(dci_env "${prefix}_SOURCE")"
+    count="$(dci_env "${prefix}_COUNT")"
+    all="$(dci_env "${prefix}_ALL")"
+    local entry="impacts[${index}]"
 
-    if [[ -z ${count}${all}${source} ]]; then
-        echo null
+    if [[ ! ${source} =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]]; then
+        log "Dynamic CI: ${entry}.source must be lowercase letters, digits, '.', '_' or '-', at most 64 characters, not '${source}'; dropping it"
         return 0
     fi
 
@@ -159,31 +161,53 @@ dci_impact() {
     "" | false | False | FALSE) all=false ;;
     true | True | TRUE) all=true ;;
     *)
-        log "Dynamic CI: impact.all must be true or false, not '${all}'; sending no impact"
-        echo null
+        log "Dynamic CI: ${entry}.all must be true or false, not '${all}'; dropping ${source}"
         return 0
         ;;
     esac
 
     if [[ ! ${count} =~ ^[0-9]{1,8}$ ]] || ((10#${count} > MAX_IMPACT_COUNT)); then
         if [[ ${all} == false ]]; then
-            log "Dynamic CI: impact.count must be a whole number from 0 to ${MAX_IMPACT_COUNT}, not '${count}'; sending no impact"
-            echo null
+            log "Dynamic CI: ${entry}.count must be a whole number from 0 to ${MAX_IMPACT_COUNT}, not '${count}'; dropping ${source}"
             return 0
         fi
         count=""
     fi
 
-    if ((${#source} > MAX_IMPACT_SOURCE_LENGTH)); then
-        log "Dynamic CI: impact.source is longer than ${MAX_IMPACT_SOURCE_LENGTH} characters; sending the impact without it"
-        source=""
-    fi
-
     # shellcheck disable=SC2016 # jq variables, bound by --arg, not shell ones
-    "${jq_bin}" -cn --arg count "${count}" --argjson all "${all}" --arg source "${source}" \
-        '{all: $all}
-        + (if $count == "" then {} else {count: ($count | tonumber)} end)
-        + (if $source == "" then {} else {source: $source} end)'
+    "${jq_bin}" -cn --arg source "${source}" --arg count "${count}" --argjson all "${all}" \
+        '{source: $source, all: $all}
+        + (if $count == "" then {} else {count: ($count | tonumber)} end)'
+}
+
+# The `impacts` option as a JSON list, or `null` when none is readable. Buildkite
+# flattens the list to IMPACTS_<n>_*, read up to the first index with nothing set.
+# Dropping an entry costs only the impact-reach signal; it never fails the plan.
+dci_impacts() {
+    local jq_bin="$1" index=0 kept=0 entries="" entry source seen=","
+    local prefix="BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS"
+    while [[ -n "$(dci_env "${prefix}_${index}_SOURCE")$(dci_env "${prefix}_${index}_COUNT")$(dci_env "${prefix}_${index}_ALL")" ]]; do
+        source="$(dci_env "${prefix}_${index}_SOURCE")"
+        entry="$(dci_impact_entry "${jq_bin}" "${index}")"
+        index=$((index + 1))
+        if [[ -z ${entry} ]]; then
+            continue
+        elif [[ ${seen} == *",${source},"* ]]; then
+            log "Dynamic CI: impacts lists ${source} more than once; keeping the first"
+        elif ((kept >= MAX_IMPACTS)); then
+            log "Dynamic CI: impacts has more than ${MAX_IMPACTS} entries; dropping ${source}"
+        else
+            seen="${seen}${source},"
+            entries="${entries}${entry}"$'\n'
+            kept=$((kept + 1))
+        fi
+    done
+
+    if [[ -z ${entries} ]]; then
+        echo null
+        return 0
+    fi
+    printf '%s' "${entries}" | "${jq_bin}" -cs '.'
 }
 
 dci_build_body() {
@@ -216,7 +240,7 @@ dci_build_body() {
         --arg pipelineSlug "${BUILDKITE_PIPELINE_SLUG-}" \
         --arg ignoreSignals "${BUILDKITE_PLUGIN_DYNAMIC_CI_IGNORE_SIGNALS-}" \
         --argjson jobKeys "${job_keys}" \
-        --argjson impact "$(dci_impact "${jq_bin}")" \
+        --argjson impacts "$(dci_impacts "${jq_bin}")" \
         --slurpfile changedFiles "${changed_files}" \
         -f "${LIB_DIR}/request-body.jq"
 }
