@@ -241,29 +241,18 @@ describe("the plan request body", () => {
   });
 });
 
-interface ImpactInput {
-  source?: string;
-  count?: string;
-  all?: string;
-}
-
-/** The env Buildkite sets for an `impacts` list: IMPACTS_<n>_SOURCE and so on. */
-const impactsEnv = (impacts: readonly ImpactInput[]): Record<string, string> =>
-  Object.fromEntries(
-    impacts.flatMap((impact, index) =>
-      (["source", "count", "all"] as const).flatMap((key) => {
-        const value = impact[key];
-        return value === undefined
-          ? []
-          : [
-              [
-                `BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS_${String(index)}_${key.toUpperCase()}`,
-                value,
-              ],
-            ];
-      }),
-    ),
-  );
+/** The `BUILDKITE_PLUGINS` an agent sets for a step with this plugin's `impacts` option. */
+const pluginsEnv = (impacts: unknown): Record<string, string> => ({
+  BUILDKITE_PLUGINS: JSON.stringify([
+    { "github.com/buildkite-plugins/docker-buildkite-plugin#v5.0.0": {} },
+    {
+      "github.com/trunk-io/dynamic-ci-buildkite-plugin#v0.1.8": {
+        mode: "upload",
+        impacts,
+      },
+    },
+  ]),
+});
 
 const printBodyAndLog = (
   env: Readonly<Record<string, string>>,
@@ -286,64 +275,107 @@ const printBodyAndLog = (
 };
 
 describe("the impacts", () => {
-  it("sends every entry, in order", () => {
+  const LIST = [
+    { source: "tainted-packages", count: 734, all: false },
+    { source: "test-files", count: "0" },
+    { source: "targets", all: true },
+    { source: "affected.v2_x", all: true, count: "lots" },
+  ];
+  const SENT = [
+    { source: "tainted-packages", count: 734, all: false },
+    { source: "test-files", count: 0, all: false },
+    { source: "targets", all: true },
+    { source: "affected.v2_x", all: true },
+  ];
+
+  it("sends every entry of the option, in order", () => {
+    const body = parsePlanRequest(printBody({ env: pluginsEnv(LIST) }));
+
+    expect(body.impacts).toEqual(SENT);
+  });
+
+  it("reads BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS as JSON before the option", () => {
     const body = parsePlanRequest(
       printBody({
-        env: impactsEnv([
-          { source: "tainted-packages", count: "734", all: "false" },
-          { source: "test-files", count: "0" },
-          { source: "targets", all: "true" },
-          { source: "affected.v2_x", all: "true", count: "lots" },
-        ]),
+        env: {
+          ...pluginsEnv([{ source: "other", count: 1 }]),
+          BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS: JSON.stringify(LIST),
+        },
       }),
     );
 
-    expect(body.impacts).toEqual([
-      { source: "tainted-packages", count: 734, all: false },
-      { source: "test-files", count: 0, all: false },
-      { source: "targets", all: true },
-      { source: "affected.v2_x", all: true },
-    ]);
+    expect(body.impacts).toEqual(SENT);
+  });
+
+  it("ignores the per-entry variables", () => {
+    expect(
+      printBody({
+        env: {
+          BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS_0_SOURCE: "test-files",
+          BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS_0_COUNT: "3",
+        },
+      }),
+    ).not.toHaveProperty("impacts");
   });
 
   it("omits the impacts when the option is unset", () => {
     expect(printBody()).not.toHaveProperty("impacts");
+    expect(printBody({ env: pluginsEnv(undefined) })).not.toHaveProperty(
+      "impacts",
+    );
   });
 
   it.each([
     {
       name: "a source that is not a slug",
-      impacts: [{ source: "Tainted", count: "1" }],
+      impacts: [{ source: "Tainted", count: 1 }],
       warning:
         "Dynamic CI: impacts[1].source must be lowercase letters, digits, '.', '_' or '-', at most 64 characters, not 'Tainted'; dropping it",
     },
     {
       name: "an entry with no source",
-      impacts: [{ count: "1" }],
+      impacts: [{ count: 1 }],
       warning:
         "Dynamic CI: impacts[1].source must be lowercase letters, digits, '.', '_' or '-', at most 64 characters, not ''; dropping it",
     },
     {
       name: "a negative count",
-      impacts: [{ source: "test-files", count: "-1" }],
+      impacts: [{ source: "test-files", count: -1 }],
       warning:
         "Dynamic CI: impacts[1].count must be a whole number from 0 to 10000000, not '-1'; dropping test-files",
     },
     {
       name: "a count above the cap",
-      impacts: [{ source: "test-files", count: "10000001" }],
+      impacts: [{ source: "test-files", count: 10000001 }],
       warning:
         "Dynamic CI: impacts[1].count must be a whole number from 0 to 10000000, not '10000001'; dropping test-files",
     },
     {
+      name: "a count that is not a whole number",
+      impacts: [{ source: "test-files", count: 1.5 }],
+      warning:
+        "Dynamic CI: impacts[1].count must be a whole number from 0 to 10000000, not '1.5'; dropping test-files",
+    },
+    {
       name: "an all that is not a boolean",
-      impacts: [{ source: "test-files", count: "3", all: "yes" }],
+      impacts: [{ source: "test-files", count: 3, all: "yes" }],
       warning:
         "Dynamic CI: impacts[1].all must be true or false, not 'yes'; dropping test-files",
     },
     {
+      name: "an unknown key",
+      impacts: [{ source: "test-files", counts: 3 }],
+      warning: "Dynamic CI: impacts[1] has unknown keys counts; dropping it",
+    },
+    {
+      name: "an entry that is not an object",
+      impacts: ["test-files"],
+      warning:
+        "Dynamic CI: impacts[1] must be an object with source, count and all; dropping it",
+    },
+    {
       name: "a source listed twice",
-      impacts: [{ source: "tainted-packages", count: "2" }],
+      impacts: [{ source: "tainted-packages", count: 2 }],
       warning:
         "Dynamic CI: impacts lists tainted-packages more than once; keeping the first",
     },
@@ -351,7 +383,7 @@ describe("the impacts", () => {
     "drops $name with a warning and keeps the rest",
     ({ impacts, warning }) => {
       const { body, log } = printBodyAndLog(
-        impactsEnv([{ source: "tainted-packages", count: "1" }, ...impacts]),
+        pluginsEnv([{ source: "tainted-packages", count: 1 }, ...impacts]),
       );
 
       expect(parsePlanRequest(body).impacts).toEqual([
@@ -361,9 +393,29 @@ describe("the impacts", () => {
     },
   );
 
+  it.each([
+    {
+      name: "is not JSON",
+      raw: "tainted-packages=3",
+      warning: "Dynamic CI: impacts is not valid JSON; sending no impacts",
+    },
+    {
+      name: "is not a list",
+      raw: JSON.stringify({ source: "test-files", count: 3 }),
+      warning: "Dynamic CI: impacts is not a JSON list; sending no impacts",
+    },
+  ])("sends no impacts when the variable $name", ({ raw, warning }) => {
+    const { body, log } = printBodyAndLog({
+      BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS: raw,
+    });
+
+    expect(parsePlanRequest(body)).not.toHaveProperty("impacts");
+    expect(log.trim()).toBe(warning);
+  });
+
   it("omits the impacts when every entry is dropped", () => {
     const { body } = printBodyAndLog(
-      impactsEnv([{ source: "test-files", count: "-1" }]),
+      pluginsEnv([{ source: "test-files", count: -1 }]),
     );
 
     expect(parsePlanRequest(body)).not.toHaveProperty("impacts");
@@ -371,10 +423,10 @@ describe("the impacts", () => {
 
   it("sends at most 8 entries", () => {
     const { body, log } = printBodyAndLog(
-      impactsEnv(
+      pluginsEnv(
         Array.from({ length: 9 }, (_unused, index) => ({
           source: `s${String(index)}`,
-          count: "1",
+          count: 1,
         })),
       ),
     );

@@ -36,8 +36,6 @@ PLAN_PATH="/v2/dynamic-ci/generate-buildkite-plan"
 TIMEOUT_SECONDS=30
 RETRIES=2
 MAX_CHANGED_FILES=200
-MAX_IMPACT_COUNT=10000000
-MAX_IMPACTS=8
 
 log() { echo "$1" >&2; }
 
@@ -141,73 +139,36 @@ dci_pr_number() {
     echo "${pr}"
 }
 
-# One `impacts` entry as JSON, or nothing (with a warning) when it is unreadable.
-dci_impact_entry() {
-    local jq_bin="$1" index="$2"
-    local prefix="BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS_${index}"
-    local source count all
-    source="$(dci_env "${prefix}_SOURCE")"
-    count="$(dci_env "${prefix}_COUNT")"
-    all="$(dci_env "${prefix}_ALL")"
-    local entry="impacts[${index}]"
-
-    if [[ ! ${source} =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]]; then
-        log "Dynamic CI: ${entry}.source must be lowercase letters, digits, '.', '_' or '-', at most 64 characters, not '${source}'; dropping it"
+# The `impacts` option as JSON: `BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS` when a
+# caller that runs the filter itself sets it, else this plugin's own entry in
+# `BUILDKITE_PLUGINS`. Empty when neither has one.
+dci_impacts_raw() {
+    local jq_bin="$1"
+    if [[ -n ${BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS-} ]]; then
+        printf '%s' "${BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS}"
         return 0
     fi
-
-    # A case per spelling rather than `${all,,}`: macOS agents run bash 3.2.
-    case "${all}" in
-    "" | false | False | FALSE) all=false ;;
-    true | True | TRUE) all=true ;;
-    *)
-        log "Dynamic CI: ${entry}.all must be true or false, not '${all}'; dropping ${source}"
-        return 0
-        ;;
-    esac
-
-    if [[ ! ${count} =~ ^[0-9]{1,8}$ ]] || ((10#${count} > MAX_IMPACT_COUNT)); then
-        if [[ ${all} == false ]]; then
-            log "Dynamic CI: ${entry}.count must be a whole number from 0 to ${MAX_IMPACT_COUNT}, not '${count}'; dropping ${source}"
-            return 0
-        fi
-        count=""
-    fi
-
-    # shellcheck disable=SC2016 # jq variables, bound by --arg, not shell ones
-    "${jq_bin}" -cn --arg source "${source}" --arg count "${count}" --argjson all "${all}" \
-        '{source: $source, all: $all}
-        + (if $count == "" then {} else {count: ($count | tonumber)} end)'
+    "${jq_bin}" -c '[.[]? | objects | to_entries[]
+        | select(.key | test("dynamic-ci"; "i")) | .value.impacts?][0] // empty' \
+        <<<"${BUILDKITE_PLUGINS:-[]}" 2>/dev/null || true
 }
 
-# The `impacts` option as a JSON list, or `null` when none is readable. Buildkite
-# flattens the list to IMPACTS_<n>_*, read up to the first index with nothing set.
-# Dropping an entry costs only the impact-reach signal; it never fails the plan.
+# The `impacts` list to send, or `null` when none is readable. Each dropped
+# entry is a warning; dropping one costs only the impact-reach signal.
 dci_impacts() {
-    local jq_bin="$1" index=0 kept=0 entries="" entry source seen=","
-    local prefix="BUILDKITE_PLUGIN_DYNAMIC_CI_IMPACTS"
-    while [[ -n "$(dci_env "${prefix}_${index}_SOURCE")$(dci_env "${prefix}_${index}_COUNT")$(dci_env "${prefix}_${index}_ALL")" ]]; do
-        source="$(dci_env "${prefix}_${index}_SOURCE")"
-        entry="$(dci_impact_entry "${jq_bin}" "${index}")"
-        index=$((index + 1))
-        if [[ -z ${entry} ]]; then
-            continue
-        elif [[ ${seen} == *",${source},"* ]]; then
-            log "Dynamic CI: impacts lists ${source} more than once; keeping the first"
-        elif ((kept >= MAX_IMPACTS)); then
-            log "Dynamic CI: impacts has more than ${MAX_IMPACTS} entries; dropping ${source}"
-        else
-            seen="${seen}${source},"
-            entries="${entries}${entry}"$'\n'
-            kept=$((kept + 1))
-        fi
-    done
-
-    if [[ -z ${entries} ]]; then
+    local jq_bin="$1" raw checked warning
+    raw="$(dci_impacts_raw "${jq_bin}")"
+    if [[ -z ${raw} ]]; then
         echo null
         return 0
     fi
-    printf '%s' "${entries}" | "${jq_bin}" -cs '.'
+    checked="$("${jq_bin}" -cn --arg raw "${raw}" -f "${LIB_DIR}/impacts.jq")"
+    while IFS= read -r warning; do
+        if [[ -n ${warning} ]]; then
+            log "Dynamic CI: ${warning}"
+        fi
+    done < <("${jq_bin}" -r '.warnings[]' <<<"${checked}")
+    "${jq_bin}" -c '.impacts' <<<"${checked}"
 }
 
 dci_build_body() {
