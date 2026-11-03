@@ -73,22 +73,28 @@ configuration:
     ignore-signals:
       description: Comma-separated signal identifiers to exclude from the recommendation.
       type: string
-    impact:
+    impacts:
       description:
-        How much of the codebase the change affects, as your build tool
-        measures it. On steps with Trunk's impact reach signal on, a broad change
-        leans toward running and a change that affects everything always runs.
-        Omit it when your tool did not compute it.
-      type: object
-      properties:
-        count:
-          description: How many units the change affects. Required unless `all` is true.
-          type: [integer, string]
-        all:
-          description: The change affects everything.
-          type: boolean
-        source:
-          description: A label for the measure, at most 64 characters.
-          type: string
-      additionalProperties: false
+        How much of the codebase the change affects, one entry per measure your
+        build tool computes. On steps with Trunk's impact reach signal on, a broad
+        change leans toward running and a change that affects everything always
+        runs. Omit it when your tool computed nothing.
+      type: array
+      maxItems: 8
+      items:
+        type: object
+        properties:
+          source:
+            description:
+              The measure, such as tainted-packages. Lowercase letters, digits,
+              '.', '_' and '-', at most 64 characters.
+            type: string
+          count:
+            description: How many units the change affects. Required unless `all` is true.
+            type: [integer, string]
+          all:
+            description: The change affects everything.
+            type: boolean
+        required: [source]
+        additionalProperties: false
   additionalProperties: false

@@ -6,8 +6,8 @@
 # quote in a branch name becomes a malformed request.
 #
 # Shapes the three fields whose types are not string: `baseSha` and `prNumber`
-# are nullable, and `runAttempt` arrives already numeric. `impact` arrives as
-# JSON already validated by `dci_impact`, or `null` to omit it.
+# are nullable, and `runAttempt` arrives already numeric. `impacts` arrives as
+# a JSON list already validated by `dci_impacts`, or `null` to omit it.
 
 # Optional fields are omitted rather than sent empty. The engine distinguishes an
 # absent value from an empty one, and "" is not a real actor or event name.
@@ -37,6 +37,6 @@ def signals:
 + optional("triggeringActor"; $triggeringActor)
 + optional("eventName"; $eventName)
 + (if $ignoreSignals == "" then {} else { ignoreSignals: signals } end)
-+ (if $impact == null then {} else { impact: $impact } end)
++ (if $impacts == null then {} else { impacts: $impacts } end)
 # Slurped: empty when the diff could not be taken, which omits the field.
 + (if ($changedFiles | length) == 0 then {} else { changedFiles: $changedFiles[0] } end)
