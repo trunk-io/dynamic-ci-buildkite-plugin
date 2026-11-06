@@ -157,3 +157,16 @@ describe("collect-keys.jq with exclude-keys", () => {
     });
   });
 });
+
+describe("collect-keys.jq on fan-out steps", () => {
+  it("asks once for a matrix step and once for a parallelism step, by their one key", () => {
+    expect(
+      collect({
+        steps: [
+          { key: "image", command: "make", matrix: ["amd64", "arm64"] },
+          { key: "shards", command: "make test", parallelism: 4 },
+        ],
+      }),
+    ).toEqual(["image", "shards"]);
+  });
+});

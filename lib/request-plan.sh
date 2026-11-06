@@ -203,8 +203,12 @@ dci_build_body() {
         --argjson jobKeys "${job_keys}" \
         --argjson impacts "$(dci_impacts "${jq_bin}")" \
         --slurpfile changedFiles "${changed_files}" \
+        --slurpfile matrixBlocks "${TRUNK_DCI_MATRIX_BLOCKS:-/dev/null}" \
         -f "${LIB_DIR}/request-body.jq"
 }
+
+# `TRUNK_DCI_MATRIX_BLOCKS` names a file holding the filter's `matrixBlocks`
+# (`matrix-blocks.sh`); unset or empty sends none.
 
 # The failure reason and repo for the caller's telemetry, in the Action's vocabulary.
 DCI_FAIL_REASON="internal"

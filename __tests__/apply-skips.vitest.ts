@@ -201,3 +201,42 @@ describe("apply-skips.jq", () => {
     });
   });
 });
+
+// A matrix or `parallelism` step is one step with one key, so a skip covers
+// every leg or shard and leaves the fan-out declaration as written.
+describe("apply-skips.jq on fan-out steps", () => {
+  const MATRIX_STEP = {
+    key: "image",
+    label: "build {{matrix}}",
+    command: "make image",
+    matrix: {
+      setup: ["amd64", "${ARM}"],
+      adjustments: [{ with: "riscv", soft_fail: true }],
+    },
+  };
+  const PARALLEL_STEP = {
+    key: "shards",
+    label: "shard %n",
+    command: "make test",
+    parallelism: 4,
+  };
+
+  it("skips a matrix step and a parallelism step whole, changing nothing else", () => {
+    expect(
+      applySkips(
+        { image: "Trunk Dynamic CI: a", shards: "Trunk Dynamic CI: b" },
+        { steps: [MATRIX_STEP, PARALLEL_STEP] },
+      ),
+    ).toEqual({
+      steps: [
+        { ...MATRIX_STEP, skip: "Trunk Dynamic CI: a" },
+        { ...PARALLEL_STEP, skip: "Trunk Dynamic CI: b" },
+      ],
+    });
+  });
+
+  it("leaves a fan-out step the plan runs exactly as written", () => {
+    const input = { steps: [MATRIX_STEP, PARALLEL_STEP] };
+    expect(applySkips({}, input)).toEqual(input);
+  });
+});
