@@ -277,6 +277,22 @@ export interface components {
              * @example 51d537a714c0f1c8a4e92b13d5f0e6a7c2b9d8e1
              */
             workflowFileSha?: string;
+            /**
+             * @description For matrix jobs whose rows a planner job builds at run time (`fromJSON`): each job's rows array, by job key, as the exact JSON text the planner emitted. Send the text unchanged; Trunk returns the rows it keeps in the same text. A job is pruned per variation only when its rows are sent and they are its whole matrix. Send at most 64 jobs, 64 KiB and 256 rows per job, and 256 KiB in all; a job over its limits is decided as a whole.
+             * @example {
+             *       "tests": "[{\"suite\":\"api\",\"shard\":1},{\"suite\":\"web\",\"shard\":1}]"
+             *     }
+             */
+            matrixRows?: {
+                [key: string]: string;
+            };
+            /**
+             * @description Job keys whose rows you left out of `matrixRows` for size. Informational: those jobs are decided as a whole.
+             * @example [
+             *       "bin-packed"
+             *     ]
+             */
+            matrixRowsOmitted?: string[];
         };
         JobVerdict: {
             /**
