@@ -360,6 +360,32 @@ export interface components {
              * @example [{"lane":"parallel","shard":1}]
              */
             include?: string;
+            /**
+             * @description For a Buildkite matrix with no dimension names (`matrix: [a, b]` or `setup: [a, b]`): the positions in the step's setup list to delete, counted from 0 in the list you sent in `matrixBlocks`, ascending. Delete them from the step you upload; never every position.
+             * @example [
+             *       1
+             *     ]
+             */
+            dropSetup?: number[];
+            /** @description For a Buildkite matrix with named dimensions: entries to append, unchanged, to the step's `matrix.adjustments`. Each skips one variation. With your own adjustments, the step never has more than Buildkite's limit of 12. */
+            adjustments?: components["schemas"]["PruneAdjustment"][];
+        };
+        PruneAdjustment: {
+            /**
+             * @description The variation's value for each named dimension, as strings. Buildkite matches these against your `setup` values by their string form.
+             * @example {
+             *       "os": "macos",
+             *       "arch": "arm64"
+             *     }
+             */
+            with: {
+                [key: string]: string;
+            };
+            /**
+             * @description The reason Buildkite shows for the skipped variation. It starts with `Trunk Dynamic CI:`.
+             * @example Trunk Dynamic CI: no changed file has broken this variation.
+             */
+            skip: string;
         };
         /**
          * @description One signal's contribution. `MUST_RUN` and `NEVER_RUN` are hard verdicts (a single one decides, with `MUST_RUN` winning a tie); `VOTE_RUN` and `VOTE_NO_RUN` are weighted votes. `INCOMPLETE` means the signal applies but lacks evidence — two of them fail the job safe to running. `ABSTAIN` means the signal does not apply at all and is excluded from the tally entirely, which is what makes it different from `INCOMPLETE`.
@@ -396,6 +422,15 @@ export interface components {
              *     }
              */
             match: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description The values of `match` on the job's variation dimensions: the decision group whose verdict this variation took, and what to label this variation by. Empty when the variation sets none of them. Variations in one group can still differ in `run`, because a variation that cannot be pruned runs while its group skips, so combine variations into one line only when both `group` and `run` match.
+             * @example {
+             *       "os": "macos-14"
+             *     }
+             */
+            group?: {
                 [key: string]: unknown;
             };
             /**
