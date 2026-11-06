@@ -234,10 +234,27 @@ Only the `matrix:` blocks are sent, never the rest of the rendered pipeline.
 Deciding per variation is turned on per step in Trunk, by choosing the step's
 matrix dimensions; there is no plugin option for it.
 
+When Trunk skips some variations of a step and runs the others, the plugin
+leaves the skipped ones out of the step it uploads:
+
+- **A matrix with no dimension names** (`matrix: [amd64, arm64]` or
+  `setup: [amd64, arm64]`): the skipped values are deleted from the list. They
+  leave no job in the build, and the log names the step.
+- **A matrix with named dimensions** (`setup: {os: [...], arch: [...]}`): one
+  `matrix.adjustments` entry per skipped variation is added after your own, each
+  with a `skip:` reason that starts with `Trunk Dynamic CI:`.
+
+If the plugin cannot apply this exactly, the step runs every variation. For
+example, this happens when the two renders list a different number of values,
+or when the step would have more than Buildkite's limit of 12 adjustments. When
+Trunk skips every variation, the plugin skips the whole step, as it does for any
+other step.
+
 ## What it does to your pipeline, and what it does not
 
-The plugin's only effect is to add a `skip:` attribute to steps Trunk
-recommended skipping. Specifically:
+The plugin adds a `skip:` attribute to steps Trunk recommended skipping, and
+leaves skipped variations out of matrix steps (see [Matrix steps](#matrix-steps)).
+Specifically:
 
 - It **never writes a file in your repository**, and reads none of their
   contents. It runs `git diff` for the changed files' names, statuses and line
@@ -246,13 +263,16 @@ recommended skipping. Specifically:
   parsed by Buildkite's own agent and the change happens to the rendered copy in
   flight.
 - It **never changes a command**, adds a step, removes a step, or reorders
-  anything.
-- It **never overrides a `skip:` you wrote yourself**, including `skip: false`.
+  anything. In a matrix step it only deletes skipped values or adds skip
+  adjustments after your own.
+- It **never overrides a `skip:` you wrote yourself**, including `skip: false`,
+  and does not change the matrix of such a step.
 - A step the plan did not name is uploaded unchanged.
 
-The whole mutation is [seven lines of `jq`](lib/apply-skips.jq). It is small on
-purpose: this is the only part of the plugin that changes what your build does,
-so you should be able to read all of it.
+The whole mutation is two small `jq` programs: [`apply-skips.jq`](lib/apply-skips.jq)
+for steps and [`apply-prune.jq`](lib/apply-prune.jq) for matrix variations. They
+are small on purpose: they are the only part of the plugin that changes what
+your build does, so you should be able to read all of it.
 
 Skipped steps stay visible in the build — use **Show skipped steps** — with the
 recommendation's reason on hover. The log says the same thing in one place,

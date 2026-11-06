@@ -195,6 +195,17 @@ if ! mutated="$("${jq_bin}" --argjson skips "${skips}" \
     emit_unchanged
 fi
 
+# The steps it runs, with the matrix variations it prunes left out. A failure
+# here keeps the skips and runs every variation, which is how a plugin that
+# reads no `prune` behaves.
+skipped="${mutated}"
+if ! mutated="$("${jq_bin}" --argjson plan "${plan}" \
+    --slurpfile sent "${matrix_blocks}" \
+    -f "${PLUGIN_DIR}/lib/apply-prune.jq" <<<"${skipped}")"; then
+    log "--- :trunk: Dynamic CI could not leave out matrix variations — those steps run every variation"
+    mutated="${skipped}"
+fi
+
 outcome="$("${jq_bin}" -r -f "${PLUGIN_DIR}/lib/plan-outcome.jq" <<<"${plan}" 2>/dev/null)" ||
     outcome="2 internal"
 report "${outcome%% *}" "${outcome#* }" "$("${jq_bin}" '.jobs | length' <<<"${plan}" 2>/dev/null || echo 0)"
@@ -206,5 +217,10 @@ if summary="$("${jq_bin}" -r --argjson before "${rendered}" --argjson plan "${pl
     log "${summary}"
 else
     log "--- :trunk: Dynamic CI applied its plan"
+fi
+if pruned="$("${jq_bin}" -r --argjson before "${skipped}" \
+    -f "${PLUGIN_DIR}/lib/applied-prunes.jq" <<<"${mutated}" 2>/dev/null)" &&
+    [[ -n ${pruned} ]]; then
+    log "${pruned}"
 fi
 emit "${mutated}"
