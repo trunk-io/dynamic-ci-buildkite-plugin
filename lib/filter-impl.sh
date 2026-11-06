@@ -40,9 +40,13 @@ source "${PLUGIN_DIR}/lib/telemetry.sh"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=env.sh
 source "${PLUGIN_DIR}/lib/env.sh"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=matrix-blocks.sh
+source "${PLUGIN_DIR}/lib/matrix-blocks.sh"
 
 buffer="$(mktemp)"
 meta="$(mktemp)"
+matrix_blocks="$(mktemp)"
 emitted=false
 
 log() { echo "$1" >&2; }
@@ -55,7 +59,7 @@ safety_net() {
         log "--- :trunk: Dynamic CI exited unexpectedly — pipeline unchanged"
         cat "${buffer}" 2>/dev/null
     fi
-    rm -f "${buffer}" "${meta}"
+    rm -f "${buffer}" "${meta}" "${matrix_blocks}"
 }
 trap safety_net EXIT
 
@@ -156,6 +160,11 @@ if [[ ${keys} == "[]" ]]; then
     emit_unchanged
 fi
 
+dci_matrix_blocks "${jq_bin}" "${keys}" "${rendered}" "${buffer}" "${matrix_blocks}"
+if [[ -s ${matrix_blocks} ]]; then
+    dci_debug_block "${jq_bin}" "matrix blocks" "$(cat "${matrix_blocks}")"
+fi
+
 token_env="${BUILDKITE_PLUGIN_DYNAMIC_CI_TOKEN_ENV:-TRUNK_TOKEN}"
 started_ms="$(dci_now_ms)"
 report() {
@@ -163,7 +172,7 @@ report() {
 }
 
 if ! plan="$(TRUNK_DCI_JQ="${jq_bin}" TRUNK_DCI_META="${meta}" \
-    TRUNK_DCI_TOKEN_ENV="${token_env}" \
+    TRUNK_DCI_TOKEN_ENV="${token_env}" TRUNK_DCI_MATRIX_BLOCKS="${matrix_blocks}" \
     "${PLUGIN_DIR}/lib/request-plan.sh" "${keys}")"; then
     report 2 "$("${jq_bin}" -r '.reason // "internal"' "${meta}" 2>/dev/null || echo internal)" 0
     log "--- :trunk: Dynamic CI is unavailable — running every step"

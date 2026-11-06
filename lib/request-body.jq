@@ -40,3 +40,5 @@ def signals:
 + (if $impacts == null then {} else { impacts: $impacts } end)
 # Slurped: empty when the diff could not be taken, which omits the field.
 + (if ($changedFiles | length) == 0 then {} else { changedFiles: $changedFiles[0] } end)
+# Slurped: empty when no requested step has a matrix, or its values could not be read.
++ (if ($matrixBlocks | length) == 0 then {} else { matrixBlocks: $matrixBlocks[0] } end)

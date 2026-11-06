@@ -212,6 +212,28 @@ steps those were.
   command: make test
 ```
 
+## Matrix steps
+
+When a step Trunk decides has a `matrix:`, the plugin also sends Trunk that
+step's `matrix:` block, so Trunk can decide each variation of the step on its
+own history. To get the values your build will actually run with, it renders the
+pipeline a second time with `buildkite-agent pipeline upload --dry-run`, this
+time with environment variables interpolated. That render is only read; the
+pipeline that is uploaded is still the uninterpolated one.
+
+- A pipeline with no matrix step on a keyed step is not rendered a second time.
+- The second render has 5 seconds. If it fails or takes longer, Trunk decides
+  each matrix step as a whole, as it does without this.
+- At most 64 KiB of matrix blocks are sent, in pipeline order. A step left out
+  is decided as a whole, and the log names it.
+- **Do not interpolate a secret into a matrix value.** The resolved values are
+  sent to Trunk. They also already appear in your job labels and in the
+  telemetry Buildkite sends Trunk for each job.
+
+Only the `matrix:` blocks are sent, never the rest of the rendered pipeline.
+Deciding per variation is turned on per step in Trunk, by choosing the step's
+matrix dimensions; there is no plugin option for it.
+
 ## What it does to your pipeline, and what it does not
 
 The plugin's only effect is to add a `skip:` attribute to steps Trunk

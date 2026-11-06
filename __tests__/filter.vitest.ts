@@ -4,7 +4,8 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { type CiPlan, parsePlanRequest } from "./support/contract";
 import { fakeAgentPath } from "./support/agent";
-import { PLUGIN_ROOT, vendoredJqPath } from "./support/jq";
+import { runFilter } from "./support/filter";
+import { PLUGIN_ROOT } from "./support/jq";
 import {
   AGENT_ENV,
   type CapturedRequest,
@@ -12,32 +13,6 @@ import {
 } from "./support/plan-server";
 
 const execFileAsync = promisify(execFile);
-
-/**
- * Runs the filter with stdin piped in. **Asynchronous on purpose**: the plan
- * server below lives on this process's event loop, so a synchronous child would
- * block the loop it needs to answer on — the filter would then wait out curl's
- * whole retry budget and the test would hang rather than fail.
- */
-const runFilter = async (
-  input: string,
-  env: Readonly<Record<string, string>> = {},
-): Promise<{ stdout: string; stderr: string }> => {
-  const child = execFileAsync(
-    join(PLUGIN_ROOT, "bin/trunk-dynamic-ci-filter"),
-    {
-      encoding: "utf8",
-      env: {
-        PATH: process.env["PATH"] ?? "",
-        TRUNK_DCI_JQ: vendoredJqPath(),
-        ...AGENT_ENV,
-        ...env,
-      },
-    },
-  );
-  child.child.stdin?.end(input);
-  return child;
-};
 
 const PIPELINE = {
   steps: [
