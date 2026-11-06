@@ -111,11 +111,12 @@ const filterWith = async (
   {
     input = YAML,
     env = {},
-  }: { input?: string; env?: Record<string, string> } = {},
+    plan = PLAN,
+  }: { input?: string; env?: Record<string, string>; plan?: CiPlan } = {},
 ) => {
   const captured: CapturedRequest = {};
   let result = { stdout: "", stderr: "" };
-  await withPlanServer(PLAN, captured, async (address) => {
+  await withPlanServer(plan, captured, async (address) => {
     result = await runFilter(input, {
       TRUNK_PUBLIC_API_ADDRESS: address,
       PATH: agent.path,
@@ -313,4 +314,51 @@ describe("with_timeout without timeout or gtimeout", () => {
       killedSoon: true,
     });
   }, 10_000);
+});
+
+describe("the filter's matrix prune", () => {
+  const pruning: CiPlan = {
+    jobs: [
+      {
+        jobKey: "image",
+        run: true,
+        summary: "Runs 1 of 2 matrix variations (amd64).",
+        signals: [],
+        prune: { dropSetup: [1] },
+      },
+      { jobKey: "unit", run: false, summary: "passed 40/40", signals: [] },
+    ],
+  };
+
+  it("uploads the step without the pruned value and names it in the log", async () => {
+    const agent = fakeAgent(RENDERED, { rendered: INTERPOLATED });
+
+    const { stdout, stderr } = await filterWith(agent, { plan: pruning });
+
+    expect({
+      uploaded: JSON.parse(stdout),
+      logged: stderr.includes(
+        "Dynamic CI left out 1 matrix variation(s)\n    image — 1 left out",
+      ),
+    }).toEqual({
+      uploaded: {
+        steps: [
+          { key: "image", command: "build", matrix: ["amd64"] },
+          UPLOADED.steps[1],
+        ],
+      },
+      logged: true,
+    });
+  });
+
+  it("runs every variation when it sent no block for the step", async () => {
+    const agent = fakeAgent(RENDERED, { exitCode: 1 });
+
+    const { stdout, stderr } = await filterWith(agent, { plan: pruning });
+
+    expect({
+      uploaded: JSON.parse(stdout),
+      logged: stderr.includes("left out"),
+    }).toEqual({ uploaded: UPLOADED, logged: false });
+  });
 });
