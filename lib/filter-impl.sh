@@ -63,12 +63,6 @@ safety_net() {
 }
 trap safety_net EXIT
 
-emit_unchanged() {
-    cat "${buffer}"
-    emitted=true
-    exit 0
-}
-
 emit() {
     printf '%s\n' "$1"
     emitted=true
@@ -81,6 +75,23 @@ emit() {
 with_rbq_dispatch() {
     "${jq_bin}" --arg id "${TRUNK_RBQ_DISPATCH_ID}" \
         -f "${PLUGIN_DIR}/lib/apply-rbq-dispatch.jq" <<<"$1"
+}
+
+# Without a dispatch id, the customer's exact bytes. With one, the rendered
+# pipeline carrying it to trigger steps, so a child build still gets it when
+# Dynamic CI decides nothing; the exact bytes again if that cannot be done.
+rendered=""
+emit_unchanged() {
+    local propagated
+    if [[ -n ${TRUNK_RBQ_DISPATCH_ID-} ]]; then
+        if [[ -n ${rendered} ]] && propagated="$(with_rbq_dispatch "${rendered}")"; then
+            emit "${propagated}"
+        fi
+        log "--- :trunk: Dynamic CI could not pass TRUNK_RBQ_DISPATCH_ID to trigger steps"
+    fi
+    cat "${buffer}"
+    emitted=true
+    exit 0
 }
 
 cat >"${buffer}"
@@ -106,6 +117,7 @@ else
     # would substitute every `${VAR}` twice.
     if ! rendered="$(buildkite-agent pipeline upload --dry-run --format json \
         --no-interpolation <"${buffer}" 2>/dev/null)"; then
+        rendered=""
         log "--- :trunk: Dynamic CI could not read the pipeline — pipeline unchanged"
         emit_unchanged
     fi
@@ -164,9 +176,6 @@ if [[ ${keys} == "[]" ]]; then
     else
         log "--- :trunk: Dynamic CI found no step with a key: attribute — pipeline unchanged"
         log "    Add a key: to the steps you want Trunk to decide about."
-    fi
-    if [[ -n ${TRUNK_RBQ_DISPATCH_ID-} ]] && propagated="$(with_rbq_dispatch "${rendered}")"; then
-        emit "${propagated}"
     fi
     emit_unchanged
 fi

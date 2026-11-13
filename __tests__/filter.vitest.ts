@@ -1,4 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
@@ -207,6 +209,56 @@ describe("Run Before Queue's dispatch id", () => {
         },
       ],
     });
+  });
+
+  it("passes it to trigger steps when the plan call fails", async () => {
+    const { stdout } = await runFilter(JSON.stringify(PIPELINE), {
+      TRUNK_PUBLIC_API_ADDRESS: "http://127.0.0.1:1",
+      TRUNK_RBQ_DISPATCH_ID: DISPATCH_ID,
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      steps: [
+        PIPELINE.steps[0],
+        PIPELINE.steps[1],
+        {
+          ...PIPELINE.steps[2],
+          build: { env: { TRUNK_RBQ_DISPATCH_ID: DISPATCH_ID } },
+        },
+      ],
+    });
+  });
+
+  it("replays the input byte for byte when the plan call fails and it is unset", async () => {
+    const json = `${JSON.stringify(PIPELINE, null, 2)}\n`;
+
+    const { stdout } = await runFilter(json, {
+      TRUNK_PUBLIC_API_ADDRESS: "http://127.0.0.1:1",
+    });
+
+    expect(stdout).toBe(json);
+  });
+
+  it("replays an unreadable pipeline and says the id was not passed down", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dci-agent-"));
+    writeFileSync(
+      join(dir, "buildkite-agent"),
+      "#!/usr/bin/env bash\nexit 1\n",
+      {
+        mode: 0o755,
+      },
+    );
+    const yaml = "steps:\n  - trigger: core\n";
+
+    const { stdout, stderr } = await runFilter(yaml, {
+      PATH: `${dir}:${process.env["PATH"] ?? ""}`,
+      TRUNK_RBQ_DISPATCH_ID: DISPATCH_ID,
+    });
+
+    expect(stdout).toBe(yaml);
+    expect(stderr).toContain(
+      "could not pass TRUNK_RBQ_DISPATCH_ID to trigger steps",
+    );
   });
 });
 
