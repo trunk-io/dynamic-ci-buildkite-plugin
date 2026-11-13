@@ -216,6 +216,24 @@ describe("the plan request body", () => {
     expect(body).not.toHaveProperty("eventName");
   });
 
+  it("sends TRUNK_RBQ_DISPATCH_ID unchanged as rbqDispatchId", () => {
+    const id = "3f9d2c1e-7a4b-4e8f-9c2d-5b6a7e8f9a0b";
+    const body = printBody({ env: { TRUNK_RBQ_DISPATCH_ID: id } });
+
+    expect(() => parsePlanRequest(body)).not.toThrow();
+    expect(body).toHaveProperty("rbqDispatchId", id);
+  });
+
+  it("omits rbqDispatchId when TRUNK_RBQ_DISPATCH_ID is unset or empty", () => {
+    const cwd = nonGitDir();
+    const unset = printBody({ cwd });
+
+    expect(unset).not.toHaveProperty("rbqDispatchId");
+    expect(printBody({ cwd, env: { TRUNK_RBQ_DISPATCH_ID: "" } })).toEqual(
+      unset,
+    );
+  });
+
   it("splits ignore-signals and drops the empties", () => {
     const body = parsePlanRequest(
       printBody({
