@@ -138,6 +138,78 @@ describe("filter mode", () => {
   });
 });
 
+describe("Run Before Queue's dispatch id", () => {
+  const DISPATCH_ID = "3f9d2c1e-7a4b-4e8f-9c2d-5b6a7e8f9a0b";
+
+  it("sends it on the plan request and passes it to each trigger step's build", async () => {
+    const captured: { received?: unknown } = {};
+
+    await withPlanServer(PLAN, captured, async (address) => {
+      const { stdout } = await runFilter(JSON.stringify(PIPELINE), {
+        TRUNK_PUBLIC_API_ADDRESS: address,
+        TRUNK_RBQ_DISPATCH_ID: DISPATCH_ID,
+      });
+
+      expect(JSON.parse(stdout)).toEqual({
+        steps: [
+          {
+            key: "unit",
+            label: "Unit",
+            command: "make test",
+            skip: "Trunk Dynamic CI: passed 40/40",
+          },
+          { key: "e2e", label: "E2E", command: "make e2e" },
+          {
+            key: "downstream",
+            label: "Trigger",
+            trigger: "core",
+            build: { env: { TRUNK_RBQ_DISPATCH_ID: DISPATCH_ID } },
+          },
+        ],
+      });
+    });
+
+    expect(captured.received).toHaveProperty("rbqDispatchId", DISPATCH_ID);
+  });
+
+  it("leaves trigger steps and the request without it when unset", async () => {
+    const captured: { received?: unknown } = {};
+
+    await withPlanServer(PLAN, captured, async (address) => {
+      const { stdout } = await runFilter(JSON.stringify(PIPELINE), {
+        TRUNK_PUBLIC_API_ADDRESS: address,
+      });
+
+      const { steps } = JSON.parse(stdout) as typeof PIPELINE;
+      expect(steps[2]).toEqual({
+        key: "downstream",
+        label: "Trigger",
+        trigger: "core",
+      });
+    });
+
+    expect(captured.received).not.toHaveProperty("rbqDispatchId");
+  });
+
+  // A pipeline of nothing but trigger steps asks Trunk about nothing, and is
+  // exactly where the child builds need the id.
+  it("passes it to trigger steps when no step has a key", async () => {
+    const { stdout } = await runFilter(
+      JSON.stringify({ steps: [{ trigger: "core" }] }),
+      { TRUNK_RBQ_DISPATCH_ID: DISPATCH_ID },
+    );
+
+    expect(JSON.parse(stdout)).toEqual({
+      steps: [
+        {
+          trigger: "core",
+          build: { env: { TRUNK_RBQ_DISPATCH_ID: DISPATCH_ID } },
+        },
+      ],
+    });
+  });
+});
+
 describe("the summary of what was marked", () => {
   const LONG = "passed on the last 40 runs; no correlated paths changed here";
 

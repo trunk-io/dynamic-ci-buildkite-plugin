@@ -75,6 +75,14 @@ emit() {
     exit 0
 }
 
+# A build Run Before Queue created carries `TRUNK_RBQ_DISPATCH_ID`, and the
+# builds its trigger steps launch do not inherit it. Prints the pipeline with it
+# added to each trigger step, or fails having printed nothing.
+with_rbq_dispatch() {
+    "${jq_bin}" --arg id "${TRUNK_RBQ_DISPATCH_ID}" \
+        -f "${PLUGIN_DIR}/lib/apply-rbq-dispatch.jq" <<<"$1"
+}
+
 cat >"${buffer}"
 
 jq_bin="${TRUNK_DCI_JQ-}"
@@ -157,6 +165,9 @@ if [[ ${keys} == "[]" ]]; then
         log "--- :trunk: Dynamic CI found no step with a key: attribute — pipeline unchanged"
         log "    Add a key: to the steps you want Trunk to decide about."
     fi
+    if [[ -n ${TRUNK_RBQ_DISPATCH_ID-} ]] && propagated="$(with_rbq_dispatch "${rendered}")"; then
+        emit "${propagated}"
+    fi
     emit_unchanged
 fi
 
@@ -204,6 +215,14 @@ if ! mutated="$("${jq_bin}" --argjson plan "${plan}" \
     -f "${PLUGIN_DIR}/lib/apply-prune.jq" <<<"${skipped}")"; then
     log "--- :trunk: Dynamic CI could not leave out matrix variations — those steps run every variation"
     mutated="${skipped}"
+fi
+
+if [[ -n ${TRUNK_RBQ_DISPATCH_ID-} ]]; then
+    if propagated="$(with_rbq_dispatch "${mutated}")"; then
+        mutated="${propagated}"
+    else
+        log "--- :trunk: Dynamic CI could not pass TRUNK_RBQ_DISPATCH_ID to trigger steps"
+    fi
 fi
 
 outcome="$("${jq_bin}" -r -f "${PLUGIN_DIR}/lib/plan-outcome.jq" <<<"${plan}" 2>/dev/null)" ||

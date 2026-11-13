@@ -268,9 +268,13 @@ Specifically:
 - It **never overrides a `skip:` you wrote yourself**, including `skip: false`,
   and does not change the matrix of such a step.
 - A step the plan did not name is uploaded unchanged.
+- On a build Trunk's Run Before Queue created, it copies `TRUNK_RBQ_DISPATCH_ID`
+  into each `trigger:` step's `build.env`, since a triggered build does not
+  inherit it. It also sends it on the plan request as `rbqDispatchId`.
 
-The whole mutation is two small `jq` programs: [`apply-skips.jq`](lib/apply-skips.jq)
-for steps and [`apply-prune.jq`](lib/apply-prune.jq) for matrix variations. They
+The whole mutation is three small `jq` programs: [`apply-skips.jq`](lib/apply-skips.jq)
+for steps, [`apply-prune.jq`](lib/apply-prune.jq) for matrix variations and
+[`apply-rbq-dispatch.jq`](lib/apply-rbq-dispatch.jq) for trigger steps. They
 are small on purpose: they are the only part of the plugin that changes what
 your build does, so you should be able to read all of it.
 
