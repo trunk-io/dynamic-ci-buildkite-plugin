@@ -36,6 +36,7 @@ def signals:
 }
 + optional("triggeringActor"; $triggeringActor)
 + optional("eventName"; $eventName)
++ optional("rbqDispatchId"; $rbqDispatchId)
 + (if $ignoreSignals == "" then {} else { ignoreSignals: signals } end)
 + (if $impacts == null then {} else { impacts: $impacts } end)
 # Slurped: empty when the diff could not be taken, which omits the field.

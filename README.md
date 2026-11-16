@@ -268,9 +268,13 @@ Specifically:
 - It **never overrides a `skip:` you wrote yourself**, including `skip: false`,
   and does not change the matrix of such a step.
 - A step the plan did not name is uploaded unchanged.
+- On a build Trunk's Run Before Queue created, it copies `TRUNK_RBQ_DISPATCH_ID`
+  into each `trigger:` step's `build.env`, since a triggered build does not
+  inherit it. It also sends it on the plan request as `rbqDispatchId`.
 
-The whole mutation is two small `jq` programs: [`apply-skips.jq`](lib/apply-skips.jq)
-for steps and [`apply-prune.jq`](lib/apply-prune.jq) for matrix variations. They
+The whole mutation is three small `jq` programs: [`apply-skips.jq`](lib/apply-skips.jq)
+for steps, [`apply-prune.jq`](lib/apply-prune.jq) for matrix variations and
+[`apply-rbq-dispatch.jq`](lib/apply-rbq-dispatch.jq) for trigger steps. They
 are small on purpose: they are the only part of the plugin that changes what
 your build does, so you should be able to read all of it.
 
@@ -319,6 +323,8 @@ request header, never in the body.
 Any failure — an unreachable API, a timeout, a plan this version cannot read, a
 missing `jq` — uploads your pipeline unmodified and logs why. This step is on
 the critical path of every build; the plugin will not be what breaks one.
+On a Run Before Queue build it still adds `TRUNK_RBQ_DISPATCH_ID` to trigger
+steps when it can read the pipeline.
 
 After each plan request it reports the outcome, the plugin version and how long
 the request took to Trunk, with the same token. Set `TRUNK_DISABLE_TELEMETRY=true`

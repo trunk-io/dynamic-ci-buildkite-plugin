@@ -200,6 +200,7 @@ dci_build_body() {
         --arg orgSlug "${BUILDKITE_ORGANIZATION_SLUG-}" \
         --arg pipelineSlug "${BUILDKITE_PIPELINE_SLUG-}" \
         --arg ignoreSignals "${BUILDKITE_PLUGIN_DYNAMIC_CI_IGNORE_SIGNALS-}" \
+        --arg rbqDispatchId "${TRUNK_RBQ_DISPATCH_ID-}" \
         --argjson jobKeys "${job_keys}" \
         --argjson impacts "$(dci_impacts "${jq_bin}")" \
         --slurpfile changedFiles "${changed_files}" \
