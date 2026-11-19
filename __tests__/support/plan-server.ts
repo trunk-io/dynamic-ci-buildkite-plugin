@@ -36,7 +36,16 @@ export const withPlanServer = async (
   plan: CiPlan,
   captured: CapturedRequest,
   run: (address: string) => Promise<void>,
-  { status = 200, resets = 0 }: { status?: number; resets?: number } = {},
+  {
+    status = 200,
+    resets = 0,
+    telemetryV2 = "ok",
+  }: {
+    status?: number;
+    resets?: number;
+    /** How trunk2's metrics route answers: as normal, a 500, a dropped connection, or never. */
+    telemetryV2?: "ok" | "error" | "reset" | "hang";
+  } = {},
 ): Promise<void> => {
   const body = JSON.stringify(parsePlan(plan));
   let resetsLeft = resets;
@@ -53,6 +62,18 @@ export const withPlanServer = async (
     req.on("data", (chunk: Buffer) => parts.push(chunk));
     req.on("end", () => {
       if (req.url === TELEMETRY_V2_PATH) {
+        if (telemetryV2 === "reset") {
+          req.socket.destroy();
+          return;
+        }
+        if (telemetryV2 === "hang") {
+          return;
+        }
+        if (telemetryV2 === "error") {
+          res.writeHead(500);
+          res.end();
+          return;
+        }
         captured.telemetryV2 = [
           ...(captured.telemetryV2 ?? []),
           {
@@ -90,6 +111,7 @@ export const withPlanServer = async (
     const { port }: AddressInfo = address;
     await run(`http://127.0.0.1:${String(port)}`);
   } finally {
+    server.closeAllConnections();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
     });

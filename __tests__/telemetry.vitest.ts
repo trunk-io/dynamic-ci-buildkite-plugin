@@ -553,3 +553,77 @@ describe("the OTLP body for a v2 API key", () => {
     expect(JSON.parse(stdout)).toMatchObject({ steps: expect.any(Array) });
   });
 });
+
+const V2_KEY = { TRUNK_TOKEN: "trunk_v2_AbC123" };
+
+const stepRuns = async (
+  env: Readonly<Record<string, string>>,
+  telemetryV2: "ok" | "error" | "reset" | "hang" = "ok",
+): Promise<boolean> => {
+  const marker = join(mkdtempSync(join(tmpdir(), "dci-v2-step-")), "ran");
+  await withPlanServer(
+    PLAN,
+    {},
+    async (address) => {
+      await execFileAsync(join(PLUGIN_ROOT, "hooks/command"), {
+        encoding: "utf8",
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          TRUNK_DCI_JQ: vendoredJqPath(),
+          ...AGENT_ENV,
+          ...V2_KEY,
+          TRUNK_PUBLIC_API_ADDRESS: address,
+          BUILDKITE_PLUGIN_DYNAMIC_CI_MODE: "step",
+          BUILDKITE_STEP_KEY: "e2e",
+          BUILDKITE_COMMAND: `touch ${marker}`,
+          ...env,
+        },
+      });
+    },
+    { telemetryV2 },
+  );
+  return existsSync(marker);
+};
+
+describe("a failing telemetry call with a v2 key", () => {
+  it.each([
+    { answer: "error" as const },
+    { answer: "reset" as const },
+    { answer: "hang" as const },
+  ])(
+    "uploads the same pipeline, within the 1s budget, when trunk2 answers $answer",
+    async ({ answer }) => {
+      const expected = (await reportsFor(PLAN, V2_KEY)).stdout;
+      let stdout = "";
+      const startedAt = Date.now();
+      await withPlanServer(
+        PLAN,
+        {},
+        async (address) => {
+          stdout = await runFilter(address, V2_KEY);
+        },
+        { telemetryV2: answer },
+      );
+
+      expect({ stdout, withinBudget: Date.now() - startedAt < 5_000 }).toEqual({
+        stdout: expected,
+        withinBudget: true,
+      });
+    },
+  );
+
+  it.each([
+    { answer: "error" as const },
+    { answer: "reset" as const },
+    { answer: "hang" as const },
+  ])(
+    "still runs the step under set -e when trunk2 answers $answer",
+    async ({ answer }) => {
+      expect(await stepRuns({}, answer)).toBe(true);
+    },
+  );
+
+  it("still runs the step with an unusable temp directory", async () => {
+    expect(await stepRuns({ TMPDIR: "/nonexistent" })).toBe(true);
+  });
+});
