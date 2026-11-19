@@ -9,9 +9,10 @@ def buckets($value; $bounds):
 
 ({ "1": "success", "2": "failed", "3": "omitted" }[$status | tostring] // "unspecified") as $label
 | [text("trunk.dynamic_ci.plan.status"; $label)] as $status_attribute
+| ([$duration_ms, 0] | max) as $elapsed_ms
 | "\($now_ms)000000" as $time
-| "\($now_ms - $duration_ms)000000" as $start
-| ($duration_ms / 1000) as $seconds
+| "\($now_ms - $elapsed_ms)000000" as $start
+| ($elapsed_ms / 1000) as $seconds
 | def histogram($name; $unit; $value; $bounds):
     {
       name: $name,

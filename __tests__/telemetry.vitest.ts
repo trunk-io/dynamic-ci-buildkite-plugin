@@ -455,6 +455,73 @@ describe("the OTLP body for a v2 API key", () => {
     expect(metricNames(otlpBody(overrides))).toEqual(kept);
   });
 
+  it("clamps a negative duration from a clock step to zero, as the Action does", () => {
+    const body = JSON.stringify(otlpBody({ duration_ms: "-5" }));
+
+    expect({
+      names: metricNames(JSON.parse(body)),
+      zeroDuration: body.includes(
+        '"sum":0,"min":0,"max":0,"explicitBounds":[0.05',
+      ),
+      start: body.includes('"startTimeUnixNano":"1763560801234000000"'),
+    }).toEqual({
+      names: [
+        "trunk.dynamic_ci.plans",
+        "trunk.dynamic_ci.plan.duration",
+        "trunk.dynamic_ci.plan.jobs",
+      ],
+      zeroDuration: true,
+      start: true,
+    });
+  });
+
+  it("reports a v2 key's fail-open from step mode, sends nothing when disabled", async () => {
+    const stepReport = async (env: Readonly<Record<string, string>>) => {
+      const captured: CapturedRequest = {};
+      await withPlanServer(
+        PLAN,
+        captured,
+        async (address) => {
+          await execFileAsync(join(PLUGIN_ROOT, "hooks/command"), {
+            encoding: "utf8",
+            env: {
+              PATH: process.env["PATH"] ?? "",
+              TRUNK_DCI_JQ: vendoredJqPath(),
+              ...AGENT_ENV,
+              TRUNK_TOKEN: "trunk_v2_AbC123",
+              TRUNK_PUBLIC_API_ADDRESS: address,
+              BUILDKITE_PLUGINS: PLUGINS("v0.3.0"),
+              BUILDKITE_PLUGIN_DYNAMIC_CI_MODE: "step",
+              BUILDKITE_STEP_KEY: "unit",
+              BUILDKITE_COMMAND: "true",
+              ...env,
+            },
+          });
+        },
+        { status: 500 },
+      );
+      return captured;
+    };
+
+    const failed = await stepReport({});
+    const disabled = await stepReport({ TRUNK_DISABLE_TELEMETRY: "true" });
+    const plans = JSON.stringify(failed.telemetryV2?.[0]?.body);
+
+    expect({
+      v1: failed.telemetry,
+      posts: failed.telemetryV2?.length,
+      failed: plans.includes(
+        '{"key":"trunk.dynamic_ci.plan.status","value":{"stringValue":"failed"}},{"key":"trunk.dynamic_ci.plan.reason","value":{"stringValue":"http_server_error"}}',
+      ),
+      disabled: [disabled.telemetry, disabled.telemetryV2],
+    }).toEqual({
+      v1: undefined,
+      posts: 1,
+      failed: true,
+      disabled: [undefined, undefined],
+    });
+  });
+
   it("reports a v2 key to trunk2 only, with a bearer token", async () => {
     const { captured, stdout } = await reportsFor(PLAN, {
       TRUNK_TOKEN: "trunk_v2_AbC123",

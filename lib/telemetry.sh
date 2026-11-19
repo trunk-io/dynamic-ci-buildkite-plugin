@@ -68,10 +68,11 @@ dci_telemetry_v2_url() {
 
 dci_send_telemetry_v2() {
     local jq_bin="$1" token="$2" status="$3" reason="$4" job_count="$5" started_ms="$6"
-    local now_ms environment body
+    local now_ms environment body address
     now_ms="$(dci_now_ms)"
     environment="staging"
-    if [[ ${TRUNK_PUBLIC_API_ADDRESS:-${DCI_DEFAULT_API_ADDRESS}} == "${DCI_DEFAULT_API_ADDRESS}" ]]; then
+    address="${TRUNK_PUBLIC_API_ADDRESS:-${DCI_DEFAULT_API_ADDRESS}}"
+    if [[ ${address%/} == "${DCI_DEFAULT_API_ADDRESS}" ]]; then
         environment="production"
     fi
     body="$("${jq_bin}" -cn \
