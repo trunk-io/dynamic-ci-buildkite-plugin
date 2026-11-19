@@ -2,6 +2,9 @@
 # Plan telemetry, to the GitHub Action's endpoint: one attempt, one second, never an error.
 
 DCI_TELEMETRY_PATH="/v1/dynamic-ci/plan-metrics"
+# trunk1's telemetry service refuses a v2 API key, so one reports to trunk2 instead.
+DCI_TELEMETRY_V2_PATH="/v2/telemetry/v1/metrics"
+DCI_DEFAULT_API_ADDRESS="https://api.trunk.io"
 # Found from this file, never from an inherited variable a customer's job can set.
 DCI_TELEMETRY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -48,7 +51,7 @@ dci_now_ms() {
 }
 
 dci_telemetry_url() {
-    local address="${TRUNK_PUBLIC_API_ADDRESS:-https://api.trunk.io}"
+    local address="${TRUNK_PUBLIC_API_ADDRESS:-${DCI_DEFAULT_API_ADDRESS}}"
     address="${address%/}"
     if [[ ${address} == https://* ]]; then
         local host="${address#https://}"
@@ -58,12 +61,48 @@ dci_telemetry_url() {
     fi
 }
 
+dci_telemetry_v2_url() {
+    local address="${TRUNK_PUBLIC_API_ADDRESS:-${DCI_DEFAULT_API_ADDRESS}}"
+    echo "${address%/}${DCI_TELEMETRY_V2_PATH}"
+}
+
+dci_send_telemetry_v2() {
+    local jq_bin="$1" token="$2" status="$3" reason="$4" job_count="$5" started_ms="$6"
+    local now_ms environment body address
+    now_ms="$(dci_now_ms)"
+    environment="staging"
+    address="${TRUNK_PUBLIC_API_ADDRESS:-${DCI_DEFAULT_API_ADDRESS}}"
+    if [[ ${address%/} == "${DCI_DEFAULT_API_ADDRESS}" ]]; then
+        environment="production"
+    fi
+    body="$("${jq_bin}" -cn \
+        --arg version "buildkite/$(dci_plugin_ref "${jq_bin}")" \
+        --arg environment "${environment}" \
+        --argjson status "${status}" \
+        --arg reason "${reason}" \
+        --argjson duration_ms "$((now_ms - started_ms))" \
+        --argjson job_count "${job_count}" \
+        --argjson now_ms "${now_ms}" \
+        -f "${DCI_TELEMETRY_DIR}/telemetry-otlp.jq" 2>/dev/null)" || return 0
+    curl -sS -o /dev/null --max-time 1 \
+        -X POST "$(dci_telemetry_v2_url)" \
+        -A "$(dci_user_agent "${jq_bin}")" \
+        -H "Authorization: Bearer ${token}" \
+        -H "Content-Type: application/json" \
+        --data-binary @- <<<"${body}" >/dev/null 2>&1 || true
+    return 0
+}
+
 dci_send_telemetry() {
     local jq_bin="$1" token="$2" status="$3" reason="$4" job_count="$5" started_ms="$6"
     local meta_file="$7" escaped body
     local disabled
     disabled="$(tr -d '[:space:]' <<<"${TRUNK_DISABLE_TELEMETRY-}" | tr '[:upper:]' '[:lower:]')"
     if [[ ${disabled} == "true" || -z ${token} ]]; then
+        return 0
+    fi
+    if [[ ${token} == trunk_v2_* ]]; then
+        dci_send_telemetry_v2 "${jq_bin}" "${token}" "${status}" "${reason}" "${job_count}" "${started_ms}"
         return 0
     fi
 

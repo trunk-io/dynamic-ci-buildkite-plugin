@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { CiPlan } from "./support/contract";
 import { PLUGIN_ROOT, vendoredJqPath } from "./support/jq";
@@ -380,5 +381,249 @@ describe("an unusable temp directory", () => {
     });
 
     expect(existsSync(marker)).toBe(true);
+  });
+});
+
+// A copy of trunk2's `ts/apps/public-api/src/products/telemetry/__tests__/dynamic-ci-metrics.json`,
+// the GitHub Action's body that trunk2's route tests read.
+const ACTION_BODY = readFileSync(
+  join(import.meta.dirname, "support/plan-metrics.json"),
+  "utf8",
+);
+
+const OTLP_ARGS = (overrides: Readonly<Record<string, string>> = {}) =>
+  Object.entries({
+    version: "github/v1",
+    environment: "production",
+    status: "1",
+    reason: "",
+    duration_ms: "1234",
+    job_count: "7",
+    now_ms: "1763560801234",
+    ...overrides,
+  }).flatMap(([name, value]) => [
+    ["version", "environment", "reason"].includes(name) ? "--arg" : "--argjson",
+    name,
+    value,
+  ]);
+
+const otlpBody = (overrides: Readonly<Record<string, string>> = {}): unknown =>
+  JSON.parse(
+    execFileSync(
+      vendoredJqPath(),
+      [
+        "-cn",
+        ...OTLP_ARGS(overrides),
+        "-f",
+        join(PLUGIN_ROOT, "lib/telemetry-otlp.jq"),
+      ],
+      { encoding: "utf8" },
+    ),
+  );
+
+const metricNames = (body: unknown): string[] =>
+  [
+    ...JSON.stringify(body).matchAll(/"name":"(trunk\.dynamic_ci\.[a-z_.]+)"/g),
+  ].map((match) => match[1] ?? "");
+
+describe("the OTLP body for a v2 API key", () => {
+  it("is the Action's body without the attempts and input sources the plugin lacks", () => {
+    const withoutPlanOnlyAttributes = ACTION_BODY.replace(
+      /,\s*\{\s*"key": "trunk\.dynamic_ci\.plan\.(attempts|changed_files_source|workflow_file_sha_source)",\s*"value": \{[^}]*\}\s*\}/g,
+      "",
+    );
+
+    expect(otlpBody()).toEqual(JSON.parse(withoutPlanOnlyAttributes));
+  });
+
+  it.each<{
+    name: string;
+    overrides: Record<string, string>;
+    kept: string[];
+  }>([
+    {
+      name: "a duration over 600s",
+      overrides: { duration_ms: "600001" },
+      kept: ["trunk.dynamic_ci.plans", "trunk.dynamic_ci.plan.jobs"],
+    },
+    {
+      name: "over 256 jobs",
+      overrides: { job_count: "257" },
+      kept: ["trunk.dynamic_ci.plans", "trunk.dynamic_ci.plan.duration"],
+    },
+  ])("leaves out what trunk2 would reject for $name", ({ overrides, kept }) => {
+    expect(metricNames(otlpBody(overrides))).toEqual(kept);
+  });
+
+  it("clamps a negative duration from a clock step to zero, as the Action does", () => {
+    const body = JSON.stringify(otlpBody({ duration_ms: "-5" }));
+
+    expect({
+      names: metricNames(JSON.parse(body)),
+      zeroDuration: body.includes(
+        '"sum":0,"min":0,"max":0,"explicitBounds":[0.05',
+      ),
+      start: body.includes('"startTimeUnixNano":"1763560801234000000"'),
+    }).toEqual({
+      names: [
+        "trunk.dynamic_ci.plans",
+        "trunk.dynamic_ci.plan.duration",
+        "trunk.dynamic_ci.plan.jobs",
+      ],
+      zeroDuration: true,
+      start: true,
+    });
+  });
+
+  it("reports a v2 key's fail-open from step mode, sends nothing when disabled", async () => {
+    const stepReport = async (env: Readonly<Record<string, string>>) => {
+      const captured: CapturedRequest = {};
+      await withPlanServer(
+        PLAN,
+        captured,
+        async (address) => {
+          await execFileAsync(join(PLUGIN_ROOT, "hooks/command"), {
+            encoding: "utf8",
+            env: {
+              PATH: process.env["PATH"] ?? "",
+              TRUNK_DCI_JQ: vendoredJqPath(),
+              ...AGENT_ENV,
+              TRUNK_TOKEN: "trunk_v2_AbC123",
+              TRUNK_PUBLIC_API_ADDRESS: address,
+              BUILDKITE_PLUGINS: PLUGINS("v0.3.0"),
+              BUILDKITE_PLUGIN_DYNAMIC_CI_MODE: "step",
+              BUILDKITE_STEP_KEY: "unit",
+              BUILDKITE_COMMAND: "true",
+              ...env,
+            },
+          });
+        },
+        { status: 500 },
+      );
+      return captured;
+    };
+
+    const failed = await stepReport({});
+    const disabled = await stepReport({ TRUNK_DISABLE_TELEMETRY: "true" });
+    const plans = JSON.stringify(failed.telemetryV2?.[0]?.body);
+
+    expect({
+      v1: failed.telemetry,
+      posts: failed.telemetryV2?.length,
+      failed: plans.includes(
+        '{"key":"trunk.dynamic_ci.plan.status","value":{"stringValue":"failed"}},{"key":"trunk.dynamic_ci.plan.reason","value":{"stringValue":"http_server_error"}}',
+      ),
+      disabled: [disabled.telemetry, disabled.telemetryV2],
+    }).toEqual({
+      v1: undefined,
+      posts: 1,
+      failed: true,
+      disabled: [undefined, undefined],
+    });
+  });
+
+  it("reports a v2 key to trunk2 only, with a bearer token", async () => {
+    const { captured, stdout } = await reportsFor(PLAN, {
+      TRUNK_TOKEN: "trunk_v2_AbC123",
+    });
+
+    expect({
+      v1: captured.telemetry,
+      authorizations: captured.telemetryV2?.map((post) => post.authorization),
+      names: captured.telemetryV2?.map((post) => metricNames(post.body)),
+      version: JSON.stringify(captured.telemetryV2?.[0]?.body).includes(
+        '"service.version","value":{"stringValue":"buildkite/v0.3.0"}',
+      ),
+      environment: JSON.stringify(captured.telemetryV2?.[0]?.body).includes(
+        '"stringValue":"staging"',
+      ),
+    }).toEqual({
+      v1: undefined,
+      authorizations: ["Bearer trunk_v2_AbC123"],
+      names: [
+        [
+          "trunk.dynamic_ci.plans",
+          "trunk.dynamic_ci.plan.duration",
+          "trunk.dynamic_ci.plan.jobs",
+        ],
+      ],
+      version: true,
+      environment: true,
+    });
+    expect(JSON.parse(stdout)).toMatchObject({ steps: expect.any(Array) });
+  });
+});
+
+const V2_KEY = { TRUNK_TOKEN: "trunk_v2_AbC123" };
+
+const stepRuns = async (
+  env: Readonly<Record<string, string>>,
+  telemetryV2: "ok" | "error" | "reset" | "hang" = "ok",
+): Promise<boolean> => {
+  const marker = join(mkdtempSync(join(tmpdir(), "dci-v2-step-")), "ran");
+  await withPlanServer(
+    PLAN,
+    {},
+    async (address) => {
+      await execFileAsync(join(PLUGIN_ROOT, "hooks/command"), {
+        encoding: "utf8",
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          TRUNK_DCI_JQ: vendoredJqPath(),
+          ...AGENT_ENV,
+          ...V2_KEY,
+          TRUNK_PUBLIC_API_ADDRESS: address,
+          BUILDKITE_PLUGIN_DYNAMIC_CI_MODE: "step",
+          BUILDKITE_STEP_KEY: "e2e",
+          BUILDKITE_COMMAND: `touch ${marker}`,
+          ...env,
+        },
+      });
+    },
+    { telemetryV2 },
+  );
+  return existsSync(marker);
+};
+
+describe("a failing telemetry call with a v2 key", () => {
+  it.each([
+    { answer: "error" as const },
+    { answer: "reset" as const },
+    { answer: "hang" as const },
+  ])(
+    "uploads the same pipeline, within the 1s budget, when trunk2 answers $answer",
+    async ({ answer }) => {
+      const expected = (await reportsFor(PLAN, V2_KEY)).stdout;
+      let stdout = "";
+      const startedAt = Date.now();
+      await withPlanServer(
+        PLAN,
+        {},
+        async (address) => {
+          stdout = await runFilter(address, V2_KEY);
+        },
+        { telemetryV2: answer },
+      );
+
+      expect({ stdout, withinBudget: Date.now() - startedAt < 5_000 }).toEqual({
+        stdout: expected,
+        withinBudget: true,
+      });
+    },
+  );
+
+  it.each([
+    { answer: "error" as const },
+    { answer: "reset" as const },
+    { answer: "hang" as const },
+  ])(
+    "still runs the step under set -e when trunk2 answers $answer",
+    async ({ answer }) => {
+      expect(await stepRuns({}, answer)).toBe(true);
+    },
+  );
+
+  it("still runs the step with an unusable temp directory", async () => {
+    expect(await stepRuns({ TMPDIR: "/nonexistent" })).toBe(true);
   });
 });
