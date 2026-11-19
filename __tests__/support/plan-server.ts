@@ -9,11 +9,14 @@ export interface CapturedRequest {
   /** Raw protobuf bodies sent to the telemetry path, in order. */
   telemetry?: Buffer[];
   telemetryUserAgent?: string;
+  /** OTLP JSON bodies sent to trunk2's metrics route, with their authorization. */
+  telemetryV2?: { authorization: string | undefined; body: unknown }[];
   /** Plan requests the server dropped without answering. */
   resets?: number;
 }
 
 export const TELEMETRY_PATH = "/v1/dynamic-ci/plan-metrics";
+export const TELEMETRY_V2_PATH = "/v2/telemetry/v1/metrics";
 
 /**
  * A plan endpoint on loopback, so curl, the request body and the response
@@ -38,7 +41,9 @@ export const withPlanServer = async (
   const body = JSON.stringify(parsePlan(plan));
   let resetsLeft = resets;
   const server: Server = createServer((req, res) => {
-    if (req.url !== TELEMETRY_PATH && resetsLeft > 0) {
+    const isTelemetry =
+      req.url === TELEMETRY_PATH || req.url === TELEMETRY_V2_PATH;
+    if (!isTelemetry && resetsLeft > 0) {
       resetsLeft -= 1;
       captured.resets = (captured.resets ?? 0) + 1;
       req.socket.destroy();
@@ -47,6 +52,18 @@ export const withPlanServer = async (
     const parts: Buffer[] = [];
     req.on("data", (chunk: Buffer) => parts.push(chunk));
     req.on("end", () => {
+      if (req.url === TELEMETRY_V2_PATH) {
+        captured.telemetryV2 = [
+          ...(captured.telemetryV2 ?? []),
+          {
+            authorization: req.headers.authorization,
+            body: JSON.parse(Buffer.concat(parts).toString("utf8")),
+          },
+        ];
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end("{}");
+        return;
+      }
       if (req.url === TELEMETRY_PATH) {
         captured.telemetry = [
           ...(captured.telemetry ?? []),

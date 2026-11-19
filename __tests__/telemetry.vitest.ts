@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { CiPlan } from "./support/contract";
 import { PLUGIN_ROOT, vendoredJqPath } from "./support/jq";
@@ -380,5 +381,108 @@ describe("an unusable temp directory", () => {
     });
 
     expect(existsSync(marker)).toBe(true);
+  });
+});
+
+// A copy of trunk2's `ts/apps/public-api/src/products/telemetry/__tests__/dynamic-ci-metrics.json`,
+// the GitHub Action's body that trunk2's route tests read.
+const ACTION_BODY = readFileSync(
+  join(import.meta.dirname, "support/plan-metrics.json"),
+  "utf8",
+);
+
+const OTLP_ARGS = (overrides: Readonly<Record<string, string>> = {}) =>
+  Object.entries({
+    version: "github/v1",
+    environment: "production",
+    status: "1",
+    reason: "",
+    duration_ms: "1234",
+    job_count: "7",
+    now_ms: "1763560801234",
+    ...overrides,
+  }).flatMap(([name, value]) => [
+    ["version", "environment", "reason"].includes(name) ? "--arg" : "--argjson",
+    name,
+    value,
+  ]);
+
+const otlpBody = (overrides: Readonly<Record<string, string>> = {}): unknown =>
+  JSON.parse(
+    execFileSync(
+      vendoredJqPath(),
+      [
+        "-cn",
+        ...OTLP_ARGS(overrides),
+        "-f",
+        join(PLUGIN_ROOT, "lib/telemetry-otlp.jq"),
+      ],
+      { encoding: "utf8" },
+    ),
+  );
+
+const metricNames = (body: unknown): string[] =>
+  [
+    ...JSON.stringify(body).matchAll(/"name":"(trunk\.dynamic_ci\.[a-z_.]+)"/g),
+  ].map((match) => match[1] ?? "");
+
+describe("the OTLP body for a v2 API key", () => {
+  it("is the Action's body without the attempts and input sources the plugin lacks", () => {
+    const withoutPlanOnlyAttributes = ACTION_BODY.replace(
+      /,\s*\{\s*"key": "trunk\.dynamic_ci\.plan\.(attempts|changed_files_source|workflow_file_sha_source)",\s*"value": \{[^}]*\}\s*\}/g,
+      "",
+    );
+
+    expect(otlpBody()).toEqual(JSON.parse(withoutPlanOnlyAttributes));
+  });
+
+  it.each<{
+    name: string;
+    overrides: Record<string, string>;
+    kept: string[];
+  }>([
+    {
+      name: "a duration over 600s",
+      overrides: { duration_ms: "600001" },
+      kept: ["trunk.dynamic_ci.plans", "trunk.dynamic_ci.plan.jobs"],
+    },
+    {
+      name: "over 256 jobs",
+      overrides: { job_count: "257" },
+      kept: ["trunk.dynamic_ci.plans", "trunk.dynamic_ci.plan.duration"],
+    },
+  ])("leaves out what trunk2 would reject for $name", ({ overrides, kept }) => {
+    expect(metricNames(otlpBody(overrides))).toEqual(kept);
+  });
+
+  it("reports a v2 key to trunk2 only, with a bearer token", async () => {
+    const { captured, stdout } = await reportsFor(PLAN, {
+      TRUNK_TOKEN: "trunk_v2_AbC123",
+    });
+
+    expect({
+      v1: captured.telemetry,
+      authorizations: captured.telemetryV2?.map((post) => post.authorization),
+      names: captured.telemetryV2?.map((post) => metricNames(post.body)),
+      version: JSON.stringify(captured.telemetryV2?.[0]?.body).includes(
+        '"service.version","value":{"stringValue":"buildkite/v0.3.0"}',
+      ),
+      environment: JSON.stringify(captured.telemetryV2?.[0]?.body).includes(
+        '"stringValue":"staging"',
+      ),
+    }).toEqual({
+      v1: undefined,
+      authorizations: ["Bearer trunk_v2_AbC123"],
+      names: [
+        [
+          "trunk.dynamic_ci.plans",
+          "trunk.dynamic_ci.plan.duration",
+          "trunk.dynamic_ci.plan.jobs",
+        ],
+      ],
+      version: true,
+      environment: true,
+    });
+    expect(JSON.parse(stdout)).toMatchObject({ steps: expect.any(Array) });
   });
 });

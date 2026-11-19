@@ -327,7 +327,8 @@ On a Run Before Queue build it still adds `TRUNK_RBQ_DISPATCH_ID` to trigger
 steps when it can read the pipeline.
 
 After each plan request it reports the outcome, the plugin version and how long
-the request took to Trunk, with the same token. Set `TRUNK_DISABLE_TELEMETRY=true`
+the request took to Trunk, with the same token (a v2 API key, `trunk_v2_…`,
+reports to `TRUNK_PUBLIC_API_ADDRESS`). Set `TRUNK_DISABLE_TELEMETRY=true`
 to turn this off.
 
 ## Development
